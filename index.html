@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#111811" />
+    <meta name="description" content="Explore the Virtual Army Museum, a first-person collection of military vehicles, aviation, weapons and technology." />
+    <title>Virtual Army Museum</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="museum-canvas" aria-label="Interactive 3D museum"></canvas>
+      <div id="welcome" class="screen">
+        <div class="welcome-copy">
+          <div class="eyebrow"><span class="dot"></span> EST. 2024 &nbsp;·&nbsp; DIGITAL COLLECTION</div>
+          <h1>VIRTUAL<br /><span>ARMY MUSEUM</span></h1>
+          <p class="welcome-lede">A living archive of engineering, courage and history.<br />Walk among the machines that shaped a century.</p>
+          <button id="enter-button" class="primary-button"><span>ENTER THE MUSEUM</span><span class="arrow">↗</span></button>
+          <div class="welcome-meta"><span>11 EXHIBITS</span><span>·</span><span>5 COLLECTIONS</span><span>·</span><span>FIRST-PERSON EXPERIENCE</span></div>
+        </div>
+        <div class="welcome-bottom"><span>VIRTUAL ARMY MUSEUM</span><span>COLLECTION / 001—011</span></div>
+      </div>
+      <div id="loading" class="loading hidden"><div class="loader-mark">V<span>·</span>M</div><div class="loading-title">PREPARING THE GALLERIES</div><div class="progress-track"><div id="progress-fill"></div></div><div id="loading-text">Opening the museum…</div></div>
+      <div id="hud" class="hidden">
+        <header class="topbar"><a class="brand" href="#"><span class="brand-mark">V<span>·</span>M</span><span>VIRTUAL<br />ARMY MUSEUM</span></a><nav id="section-nav" aria-label="Museum collections"></nav><div class="top-actions"><button id="help-button" class="icon-button" title="Controls">? <span>HELP</span></button><button id="exit-button" class="icon-button" title="Exit museum">× <span>EXIT</span></button></div></header>
+        <div class="location-chip"><span class="dot"></span><div><small>NOW EXPLORING</small><strong id="location-name">THE GRAND GALLERY</strong></div></div>
+        <div class="crosshair"><i></i><i></i></div>
+        <div id="hint" class="hint">CLICK TO LOOK AROUND <span>·</span> WASD TO MOVE</div>
+        <div id="info-card" class="info-card hidden"><button id="close-info" class="close-info" aria-label="Close">×</button><div id="info-category" class="eyebrow">COLLECTION</div><h2 id="info-title"></h2><p id="info-description"></p><div class="inspect-note">DRAG TO ROTATE MODEL <span>·</span> SCROLL TO ZOOM</div></div>
+        <div id="help-modal" class="modal hidden"><div class="modal-card"><button class="modal-close" data-close="help-modal">×</button><div class="eyebrow">FIELD GUIDE / 01</div><h2>HOW TO EXPLORE</h2><div class="control-row"><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>Move through the galleries</span></div><div class="control-row"><kbd>MOUSE</kbd><span>Look around</span></div><div class="control-row"><kbd>CLICK</kbd><span>Select an exhibit or recapture look</span></div><div class="control-row"><kbd>ESC</kbd><span>Release the mouse</span></div><p class="modal-foot">Approach an exhibit to load it. Click a model to read its collection notes; drag to inspect it.</p></div></div>
+        <div id="toast" class="toast hidden"></div>
+      </div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
