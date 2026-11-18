@@ -3,6 +3,10 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
+import { ARButton } from 'three/addons/webxr/ARButton.js';
+import { createWarRoom, scenarios } from './warRoom.js';
+import { MuseumAudio } from './museumAudio.js';
+import { MuseumMultiplayer, multiplayerConfigured } from './multiplayer.js';
 import t80Url from '../t-80u_t-80um-2_all_versions__broken_arrow.glb?url';
 import bombB28Url from '../b28fi_thermonuclear_bomb.glb?url';
 import centauroUrl from '../centauro_2_p_tank_destroyer.glb?url';
@@ -44,6 +48,14 @@ vrButton.className = 'icon-button vr-button';
 vrButton.setAttribute('aria-label', 'Enter immersive VR');
 Object.assign(vrButton.style, { position: 'relative', bottom: 'auto', left: 'auto', width: 'auto', borderRadius: '0', zIndex: '4', opacity: '1' });
 document.querySelector('.top-actions').prepend(vrButton);
+const arButton = ARButton.createButton(renderer, {
+  requiredFeatures: ['hit-test'], optionalFeatures: ['dom-overlay'], domOverlay: { root: document.body },
+});
+arButton.id = 'ARButton'; arButton.className = 'icon-button ar-button';
+arButton.setAttribute('aria-label', 'Enter immersive augmented reality');
+Object.assign(arButton.style, { position: 'relative', bottom: 'auto', left: 'auto', width: 'auto', borderRadius: '0', zIndex: '4', opacity: '1' });
+$('ar-enter-slot').append(arButton);
+vrButton.addEventListener('click', () => renderer.xr.setReferenceSpaceType('local-floor'), true);
 const clock = new THREE.Clock();
 const loader = new GLTFLoader();
 const raycaster = new THREE.Raycaster();
@@ -138,6 +150,17 @@ let cameraTransition = null;
 const animatedHolograms = [];
 let introGroup = null;
 const missionState = { zones: new Set(), exhibits: new Set(), quizCorrect: 0, quizAnswered: new Set(), activeQuiz: 0, complete: false };
+const museumAudio = new MuseumAudio(camera, scene);
+const warRoom = createWarRoom(scene);
+const arReticle = new THREE.Mesh(new THREE.RingGeometry(.075, .105, 32), new THREE.MeshBasicMaterial({ color: 0x75f3ff, transparent: true, opacity: .92, side: THREE.DoubleSide, toneMapped: false }));
+arReticle.name = 'webxr-hit-test-reticle'; arReticle.rotation.x = -Math.PI / 2; arReticle.matrixAutoUpdate = false; arReticle.visible = false; scene.add(arReticle);
+const arPlacedRoot = new THREE.Group(); arPlacedRoot.name = 'ar-placed-original-exhibit'; arPlacedRoot.visible = false; scene.add(arPlacedRoot);
+const arRuntime = { active: false, hitTestSource: null, session: null, selectedFile: exhibits[5].file, hiddenObjects: null, previousBackground: null, previousFog: null, previousAlpha: 1, previousCameraPosition: null, previousCameraQuaternion: null, placed: false };
+const remoteVisitors = new Map();
+let multiplayerConnected = false;
+let speechRecognizer = null;
+let scenarioTimer = null;
+let scenarioPlaying = false;
 const missionQuestions = [
   { question: 'Which exhibit is identified as a Chinese supersonic interceptor?', answers: ['J-8F Interceptor', 'Leclerc AZUR', '2S40 Floks'], correct: 0 },
   { question: 'The G3 in this collection is an example of what?', answers: ['A wheeled artillery vehicle', 'A 7.62×51 mm NATO battle rifle', 'A fighter aircraft'], correct: 1 },
@@ -329,6 +352,7 @@ function setupXRControllers() {
 }
 
 function selectFromController(controller) {
+  if (arRuntime.active) { placeARExhibit(); return; }
   if (controller.userData.suppressNextSelection) { controller.userData.suppressNextSelection = false; return; }
   controller.updateMatrixWorld(true);
   const origin = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
@@ -350,6 +374,217 @@ function selectFromController(controller) {
     }
   }
   if (selected) clearSelection();
+}
+
+async function loadARModel(file = arRuntime.selectedFile) {
+  const exhibit = exhibits.find(item => item.file === file);
+  if (!exhibit) return false;
+  arRuntime.selectedFile = exhibit.file;
+  $('ar-model-status').dataset.state = 'connecting';
+  $('ar-model-status').textContent = `Preparing ${exhibit.name}…`;
+  await loadExhibit(exhibit);
+  const root = exhibitRoots.get(exhibit.file);
+  if (!root?.userData.model) {
+    $('ar-model-status').dataset.state = 'error';
+    $('ar-model-status').textContent = `Could not load ${exhibit.name}. Choose another existing museum model.`;
+    return false;
+  }
+  $('ar-model-status').dataset.state = 'connected';
+  $('ar-model-status').textContent = `${exhibit.name} is ready. Enter AR, aim at a surface, then place it.`;
+  return true;
+}
+
+async function updateARSupport() {
+  const status = $('ar-diagnostic-status');
+  status.dataset.state = '';
+  if (!window.isSecureContext) { status.dataset.state = 'error'; status.textContent = 'AR unavailable: WebXR requires HTTPS or localhost.'; return; }
+  if (!navigator.xr?.isSessionSupported) { status.dataset.state = 'error'; status.textContent = 'This browser does not expose the WebXR API.'; return; }
+  try {
+    const supported = await navigator.xr.isSessionSupported('immersive-ar');
+    status.dataset.state = supported ? 'connected' : 'setup';
+    status.textContent = supported
+      ? 'This browser reports immersive-ar support. The ARButton also requests the required hit-test feature.'
+      : 'This browser reports immersive-ar is unavailable. AR needs a compatible mobile/headset browser and hit-test support; VR and desktop modes remain available.';
+  } catch (error) {
+    status.dataset.state = 'error';
+    status.textContent = `AR support check failed${error?.name ? ` (${error.name})` : ''}: ${error?.message || 'the browser could not query its AR runtime.'}`;
+  }
+}
+
+function beginARPresentation(session) {
+  arRuntime.active = true; arRuntime.session = session; arRuntime.placed = false;
+  arRuntime.previousBackground = scene.background; arRuntime.previousFog = scene.fog; arRuntime.previousAlpha = renderer.getClearAlpha();
+  arRuntime.previousCameraPosition = camera.position.clone(); arRuntime.previousCameraQuaternion = camera.quaternion.clone();
+  camera.position.set(0, 0, 0); camera.rotation.set(0, 0, 0); playerRig.position.set(0, 0, 0); playerRig.rotation.set(0, 0, 0);
+  const keepVisible = new Set([playerRig, arReticle, arPlacedRoot, ...xrControllers]);
+  arRuntime.hiddenObjects = scene.children.map(object => ({ object, visible: object.visible })).filter(({ object }) => !keepVisible.has(object));
+  arRuntime.hiddenObjects.forEach(({ object }) => { object.visible = false; });
+  xrControllers.forEach(controller => { controller.visible = true; });
+  scene.background = null; scene.fog = null; renderer.setClearAlpha(0);
+  arRootVisibility(true);
+  document.body.classList.add('ar-active');
+  $('ar-diagnostic-status').textContent = 'AR session active. Move the device to scan a surface; place the model with the button or a controller trigger.';
+  $('ar-place-button').disabled = true;
+  session.requestReferenceSpace('viewer')
+    .then(viewerSpace => session.requestHitTestSource({ space: viewerSpace }))
+    .then(source => { arRuntime.hitTestSource = source; })
+    .catch(error => {
+      $('ar-diagnostic-status').dataset.state = 'error';
+      $('ar-diagnostic-status').textContent = `Surface scanning failed${error?.name ? ` (${error.name})` : ''}. This device may not expose WebXR hit-test.`;
+    });
+}
+
+function arRootVisibility(visible) {
+  arReticle.visible = false; arPlacedRoot.visible = !!visible && arRuntime.placed;
+}
+
+function updateARFrame(xrFrame) {
+  if (!xrFrame || !arRuntime.hitTestSource) return;
+  const referenceSpace = renderer.xr.getReferenceSpace();
+  if (!referenceSpace) return;
+  const hit = xrFrame.getHitTestResults(arRuntime.hitTestSource)[0];
+  if (!hit) { arReticle.visible = false; $('ar-place-button').disabled = true; return; }
+  const pose = hit.getPose(referenceSpace);
+  if (!pose) return;
+  arReticle.matrix.fromArray(pose.transform.matrix);
+  arReticle.matrixWorldNeedsUpdate = true; arReticle.visible = true;
+  $('ar-place-button').disabled = false;
+}
+
+function placeARExhibit() {
+  if (!arRuntime.active || !arReticle.visible) {
+    showToast('MOVE THE DEVICE TO FIND A PLACEABLE SURFACE'); return;
+  }
+  const exhibit = exhibits.find(item => item.file === arRuntime.selectedFile);
+  const source = exhibit && exhibitRoots.get(exhibit.file)?.userData.model;
+  if (!source) { showToast('WAIT FOR THE SELECTED EXHIBIT TO FINISH LOADING'); return; }
+  arPlacedRoot.clear();
+  const placedModel = source.clone(true);
+  placedModel.scale.multiplyScalar(Math.min(1, 1.35 / exhibit.size));
+  placedModel.traverse(object => { if (object.isMesh) { object.castShadow = false; object.receiveShadow = false; } });
+  arPlacedRoot.add(placedModel);
+  arReticle.updateMatrixWorld(true);
+  arReticle.matrixWorld.decompose(arPlacedRoot.position, arPlacedRoot.quaternion, new THREE.Vector3());
+  arRootVisibility(true); arRuntime.placed = true; arPlacedRoot.visible = true;
+  $('ar-diagnostic-status').textContent = `${exhibit.name} placed. Move to scan another surface, then place again to reposition it.`;
+}
+
+function restoreARPresentation() {
+  arRuntime.hitTestSource?.cancel(); arRuntime.hitTestSource = null; arRuntime.session = null;
+  arRuntime.active = false; arRuntime.placed = false; arPlacedRoot.clear();
+  arRootVisibility(false);
+  for (const { object, visible } of arRuntime.hiddenObjects || []) object.visible = visible;
+  arRuntime.hiddenObjects = null;
+  scene.background = arRuntime.previousBackground; scene.fog = arRuntime.previousFog;
+  renderer.setClearAlpha(arRuntime.previousAlpha ?? 1);
+  if (arRuntime.previousCameraPosition) camera.position.copy(arRuntime.previousCameraPosition);
+  if (arRuntime.previousCameraQuaternion) camera.quaternion.copy(arRuntime.previousCameraQuaternion);
+  arRuntime.previousCameraPosition = null; arRuntime.previousCameraQuaternion = null;
+  renderer.xr.setReferenceSpaceType('local-floor');
+  document.body.classList.remove('ar-active');
+}
+
+function createRemoteVisitor(visitor) {
+  const group = new THREE.Group(); group.name = `visitor-${visitor.id}`;
+  const uniform = new THREE.MeshBasicMaterial({ color: 0x5deaff, transparent: true, opacity: .82, toneMapped: false });
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(.2, .62, 3, 8), uniform); body.position.y = .58; group.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.18, 10, 8), new THREE.MeshBasicMaterial({ color: 0xb0f8ff, toneMapped: false })); head.position.y = 1.08; group.add(head);
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(.32, .018, 5, 24), new THREE.MeshBasicMaterial({ color: 0x5deaff, transparent: true, opacity: .65, toneMapped: false }));
+  ring.rotation.x = Math.PI / 2; ring.position.y = .05; group.add(ring);
+  const labelCanvas = document.createElement('canvas'); labelCanvas.width = 512; labelCanvas.height = 96;
+  const ctx = labelCanvas.getContext('2d'); ctx.fillStyle = '#061522dd'; ctx.fillRect(4, 8, 504, 80);
+  ctx.strokeStyle = '#5deaff'; ctx.strokeRect(5, 9, 502, 78);
+  ctx.fillStyle = '#dffaff'; ctx.font = '600 40px Arial'; ctx.textAlign = 'center'; ctx.fillText(String(visitor.name || 'Visitor').slice(0, 20), 256, 62);
+  const labelTexture = new THREE.CanvasTexture(labelCanvas); labelTexture.colorSpace = THREE.SRGBColorSpace;
+  const label = new THREE.Sprite(new THREE.SpriteMaterial({ map: labelTexture, transparent: true, depthWrite: false }));
+  label.position.y = 1.52; label.scale.set(1.55, .3, 1); group.add(label);
+  group.userData.target = new THREE.Vector3(Number(visitor.x) || 0, 0, Number(visitor.z) || 0);
+  group.userData.yaw = Number(visitor.yaw) || 0;
+  group.userData.visitorId = visitor.id;
+  group.position.copy(group.userData.target); group.rotation.y = group.userData.yaw;
+  scene.add(group); remoteVisitors.set(visitor.id, group); return group;
+}
+
+function syncRemoteVisitors(visitors) {
+  const known = new Set(visitors.map(visitor => visitor.id));
+  for (const [id, avatar] of remoteVisitors) {
+    if (!known.has(id)) {
+      scene.remove(avatar);
+      avatar.traverse(node => {
+        node.geometry?.dispose();
+        if (Array.isArray(node.material)) node.material.forEach(material => { material.map?.dispose(); material.dispose(); });
+        else if (node.material) { node.material.map?.dispose(); node.material.dispose(); }
+      });
+      remoteVisitors.delete(id);
+    }
+  }
+  visitors.forEach(visitor => { if (!remoteVisitors.has(visitor.id)) createRemoteVisitor(visitor); });
+  $('multiplayer-count').textContent = `${Math.max(0, visitors.length + (multiplayerConnected ? 1 : 0))} ${visitors.length + (multiplayerConnected ? 1 : 0) === 1 ? 'visitor' : 'visitors'}`;
+}
+
+function receiveVisitorPose(payload) {
+  if (!payload || typeof payload.id !== 'string' || payload.id.length > 80) return;
+  const x = Number(payload.x), z = Number(payload.z), yaw = Number(payload.yaw);
+  if (![x, z, yaw].every(Number.isFinite) || Math.abs(x) > 44 || Math.abs(z) > 24) return;
+  const avatar = remoteVisitors.get(payload.id) || createRemoteVisitor(payload);
+  avatar.userData.target.set(x, 0, z);
+  avatar.userData.yaw = yaw;
+}
+
+const multiplayer = new MuseumMultiplayer({
+  onVisitors: syncRemoteVisitors,
+  onPose: receiveVisitorPose,
+  onStatus: (state, message) => {
+    $('multiplayer-status').dataset.state = state;
+    $('multiplayer-status').textContent = message;
+  },
+});
+
+function updateAudioStatus(message, state = '') {
+  $('audio-status').dataset.state = state;
+  $('audio-status').textContent = message;
+}
+
+function speakMuseumText(text) {
+  if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+    showToast('SPOKEN NARRATION IS NOT AVAILABLE IN THIS BROWSER'); return false;
+  }
+  speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = .95; utterance.pitch = 1.02; utterance.lang = document.documentElement.lang || 'en';
+  speechSynthesis.speak(utterance); return true;
+}
+
+function handleVoiceQuestion(question) {
+  const answer = guideResponse(question);
+  $('guide-answer').textContent = answer;
+  $('guide-voice-status').textContent = `Heard: “${question}”`;
+  speakMuseumText(answer);
+}
+
+function toggleGuideRecognition() {
+  if (speechRecognizer) {
+    speechRecognizer.stop(); speechRecognizer = null;
+    $('guide-listen').textContent = '◉ ASK BY VOICE'; return;
+  }
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    $('guide-voice-status').textContent = 'Speech recognition is not supported here. Type a question or use a headset/browser with Web Speech recognition.';
+    return;
+  }
+  const recognition = new Recognition();
+  speechRecognizer = recognition;
+  recognition.lang = 'en-US'; recognition.continuous = false; recognition.interimResults = false; recognition.maxAlternatives = 1;
+  recognition.onstart = () => { $('guide-listen').textContent = 'STOP LISTENING'; $('guide-voice-status').textContent = 'Listening… speak a short question.'; };
+  recognition.onresult = event => {
+    const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+    if (transcript) handleVoiceQuestion(transcript);
+  };
+  recognition.onerror = event => { $('guide-voice-status').textContent = `Voice input failed (${event.error}). Check microphone permission or use the text field.`; };
+  recognition.onend = () => { if (speechRecognizer === recognition) speechRecognizer = null; $('guide-listen').textContent = '◉ ASK BY VOICE'; };
+  $('guide-voice-status').textContent = 'Requesting microphone access…';
+  try { recognition.start(); }
+  catch (error) { speechRecognizer = null; $('guide-voice-status').textContent = `Could not start microphone input (${error?.name || 'browser error'}).`; }
 }
 
 function updateXRModelRotation() {
@@ -590,6 +825,17 @@ function buildTimeline() {
   });
 }
 
+function updateScenarioPanel() {
+  const id = $('scenario-select').value;
+  const scenario = scenarios[id] || scenarios.somme;
+  const stage = THREE.MathUtils.clamp(Number($('scenario-progress').value) || 0, 0, scenario.stages.length - 1);
+  warRoom.setScenario(id, stage);
+  $('scenario-copy').textContent = `${scenario.title} · Historical source: ${scenario.source}. The 3D display is a schematic teaching aid and is not to scale.`;
+  $('scenario-stage-label').textContent = `STAGE ${stage + 1} / ${scenario.stages.length}`;
+  $('scenario-stage').textContent = scenario.stages[stage];
+  $('war-room-stage').textContent = `${scenario.title.toUpperCase()} / SCHEMATIC`;
+}
+
 function createIntroEnvironment() {
   introGroup = new THREE.Group(); introGroup.position.set(0, 2.4, 5.7);
   const wire = new THREE.MeshBasicMaterial({ color: 0x55dff5, wireframe: true, transparent: true, opacity: .48, toneMapped: false });
@@ -615,6 +861,7 @@ function selectExhibit(e) {
   selected = e;
   missionState.exhibits.add(e.file); updateMissionUI();
   const group = exhibitRoots.get(e.file);
+  if (group) museumAudio.playExhibitCue(e, group).catch(error => updateAudioStatus(`Audio unavailable: ${error.message}`, 'error'));
   if (selectedBox) { scene.remove(selectedBox); selectedBox = null; }
   if (group?.userData.model) { selectedBox = new THREE.BoxHelper(group.userData.model, 0xcdb578); scene.add(selectedBox); }
   $('info-category').textContent = e.category;
@@ -645,6 +892,7 @@ function clearSelection() {
 
 function onCanvasClick(event) {
   if (!active) return;
+  if (arRuntime.active) { placeARExhibit(); return; }
   if (selected && !controls.isLocked) { controls.lock(); return; }
   const rect = canvas.getBoundingClientRect();
   const x = controls.isLocked ? 0 : ((event.clientX - rect.left) / rect.width) * 2 - 1;
@@ -700,9 +948,10 @@ function collided(x, z) {
   }
   return false;
 }
-function tick() {
+function tick(time, xrFrame) {
   const dt = Math.min(clock.getDelta(), .045);
   const elapsed = clock.elapsedTime;
+  warRoom.update(elapsed);
   if (introGroup) {
     introGroup.visible = !active;
     if (!active) { introGroup.rotation.y = elapsed * .08; introGroup.rotation.z = Math.sin(elapsed * .21) * .035; }
@@ -713,6 +962,11 @@ function tick() {
     core.material.opacity = .025 + (Math.sin(elapsed * .9 + phase) + 1) * .009;
   });
   if (!active) { renderer.render(scene, camera); return; }
+  if (arRuntime.active) {
+    updateARFrame(xrFrame);
+    renderer.render(scene, camera);
+    return;
+  }
   if (cameraTransition) {
     cameraTransition.elapsed = Math.min(cameraTransition.elapsed + dt, cameraTransition.duration);
     const linear = cameraTransition.elapsed / cameraTransition.duration;
@@ -754,6 +1008,22 @@ function tick() {
     if (performance.now() - lastLoadCheck > 800) { lastLoadCheck = performance.now(); ensureNearby(); }
   }
   if (selectedBox) selectedBox.update();
+  for (const avatar of remoteVisitors.values()) {
+    avatar.position.lerp(avatar.userData.target, 1 - Math.exp(-dt * 9));
+    const yawDelta = Math.atan2(Math.sin(avatar.userData.yaw - avatar.rotation.y), Math.cos(avatar.userData.yaw - avatar.rotation.y));
+    avatar.rotation.y += THREE.MathUtils.clamp(yawDelta, -dt * 4, dt * 4);
+  }
+  if (multiplayer.channel && !renderer.xr.isPresenting) {
+    const pose = getVisitorPosition();
+    const direction = camera.getWorldDirection(new THREE.Vector3());
+    multiplayer.setPose({ x: pose.x, z: pose.z, yaw: Math.atan2(direction.x, -direction.z), zone: $('location-name').textContent });
+  } else if (multiplayer.channel && renderer.xr.isPresenting) {
+    const pose = getVisitorPosition();
+    const orientation = renderer.xr.getCamera(camera).getWorldQuaternion(new THREE.Quaternion());
+    const yaw = new THREE.Euler().setFromQuaternion(orientation, 'YXZ').y;
+    const zone = sections.reduce((a, b) => Math.abs(b.x - pose.x) < Math.abs(a.x - pose.x) ? b : a);
+    multiplayer.setPose({ x: pose.x, z: pose.z, yaw, zone: zone.short });
+  }
   renderer.render(scene, camera);
   frameSampleMs += dt * 1000; frameSampleCount++;
   const now = performance.now();
@@ -777,8 +1047,12 @@ function stopRendering() {
 }
 
 buildArchitecture(); buildExhibits(); mergeStaticArchitecture(); setSectionNav(); createVRInfoPanel(); createIntroEnvironment(); buildTimeline(); renderMissionQuiz(); updateMissionUI(); setupXRControllers();
+exhibits.forEach(exhibit => { const option = document.createElement('option'); option.value = exhibit.file; option.textContent = `${exhibit.name} · ${exhibit.category}`; $('ar-exhibit-select').appendChild(option); });
+updateARSupport();
 startRendering();
 renderer.xr.addEventListener('sessionstart', () => {
+  const session = renderer.xr.getSession();
+  if (session?.mode === 'immersive-ar') { beginARPresentation(session); return; }
   const startX = camera.position.x, startZ = camera.position.z, yaw = camera.rotation.y;
   playerRig.position.set(startX, 0, startZ); playerRig.rotation.set(0, yaw, 0);
   camera.position.set(0, 0, 0); camera.rotation.set(0, 0, 0);
@@ -787,6 +1061,7 @@ renderer.xr.addEventListener('sessionstart', () => {
   $('hint').textContent = 'LEFT STICK MOVE · RIGHT STICK TURN · TRIGGER SELECT · HOLD + MOVE TO ROTATE';
 });
 renderer.xr.addEventListener('sessionend', () => {
+  if (arRuntime.active) { restoreARPresentation(); return; }
   camera.position.set(playerRig.position.x, 1.68, playerRig.position.z);
   camera.rotation.set(0, playerRig.rotation.y, 0);
   playerRig.position.set(0, 0, 0); playerRig.rotation.set(0, 0, 0);
@@ -820,9 +1095,82 @@ $('enter-button').addEventListener('click', async () => {
   setTimeout(() => { $('loading').classList.add('hidden'); $('hud').classList.remove('hidden'); }, 380);
 });
 $('help-button').addEventListener('click', () => { controls.unlock(); $('help-modal').classList.remove('hidden'); });
+$('experience-button').addEventListener('click', () => { controls.unlock(); $('experience-modal').classList.remove('hidden'); });
 $('guide-button').addEventListener('click', () => { controls.unlock(); $('guide-modal').classList.remove('hidden'); $('guide-input').focus(); });
 $('mission-button').addEventListener('click', () => { controls.unlock(); renderMissionQuiz(); updateMissionUI(); $('mission-modal').classList.remove('hidden'); });
 $('timeline-button').addEventListener('click', () => { controls.unlock(); $('timeline-modal').classList.remove('hidden'); });
+$('open-war-room').addEventListener('click', () => {
+  $('experience-modal').classList.add('hidden'); controls.unlock(); warRoom.root.visible = true;
+  $('war-room-modal').classList.remove('hidden'); updateScenarioPanel();
+});
+$('open-simulation').addEventListener('click', () => {
+  $('experience-modal').classList.add('hidden'); controls.unlock(); warRoom.root.visible = true;
+  updateScenarioPanel(); $('simulation-modal').classList.remove('hidden');
+});
+$('war-room-scenario').addEventListener('click', () => {
+  $('war-room-modal').classList.add('hidden'); updateScenarioPanel(); $('simulation-modal').classList.remove('hidden');
+});
+document.querySelectorAll('[data-map-layer]').forEach(button => button.addEventListener('click', () => {
+  const enabled = button.classList.toggle('active'); button.setAttribute('aria-pressed', String(enabled));
+  warRoom.setLayer(button.dataset.mapLayer, enabled);
+}));
+$('scenario-select').addEventListener('change', () => { $('scenario-progress').value = 0; updateScenarioPanel(); });
+$('scenario-progress').addEventListener('input', updateScenarioPanel);
+$('scenario-play').addEventListener('click', () => {
+  if (scenarioPlaying) {
+    clearInterval(scenarioTimer); scenarioTimer = null; scenarioPlaying = false;
+    $('scenario-play').querySelector('span').textContent = 'PLAY TIMELINE'; $('scenario-play').querySelector('.arrow').textContent = '▶';
+    return;
+  }
+  scenarioPlaying = true; $('scenario-play').querySelector('span').textContent = 'PAUSE TIMELINE'; $('scenario-play').querySelector('.arrow').textContent = 'Ⅱ';
+  scenarioTimer = window.setInterval(() => {
+    const progress = $('scenario-progress');
+    if (Number(progress.value) >= 2) { $('scenario-play').click(); return; }
+    progress.value = Number(progress.value) + 1; updateScenarioPanel();
+  }, 1750);
+});
+$('open-multiplayer').addEventListener('click', () => { $('experience-modal').classList.add('hidden'); controls.unlock(); $('multiplayer-modal').classList.remove('hidden'); });
+$('multiplayer-join').addEventListener('click', async () => {
+  $('multiplayer-join').disabled = true;
+  multiplayerConnected = await multiplayer.join($('room-name').value, $('visitor-name').value);
+  $('multiplayer-leave').disabled = !multiplayerConnected;
+  $('multiplayer-join').disabled = multiplayerConnected;
+  $('multiplayer-count').textContent = multiplayerConnected ? `${remoteVisitors.size + 1} ${remoteVisitors.size === 0 ? 'visitor' : 'visitors'}` : '0 visitors';
+});
+$('multiplayer-leave').addEventListener('click', async () => {
+  await multiplayer.leave(); multiplayerConnected = false;
+  $('multiplayer-leave').disabled = true; $('multiplayer-join').disabled = false;
+  $('multiplayer-count').textContent = '0 visitors';
+});
+$('open-audio').addEventListener('click', () => { $('experience-modal').classList.add('hidden'); controls.unlock(); $('audio-modal').classList.remove('hidden'); });
+$('ambient-toggle').addEventListener('change', async event => {
+  try {
+    await museumAudio.setAmbientEnabled(event.target.checked);
+    updateAudioStatus(event.target.checked ? 'Spatial ambient bed is playing. Toggle it off at any time.' : 'Ambient audio is off.');
+  } catch (error) { event.target.checked = false; updateAudioStatus(`Could not start browser audio: ${error.message}`, 'error'); }
+});
+$('audio-volume').addEventListener('input', event => {
+  const value = Number(event.target.value); museumAudio.setVolume(value / 100);
+  $('audio-volume-label').textContent = `${value}%`;
+});
+$('spatial-cues-toggle').addEventListener('change', async event => {
+  museumAudio.setCuesEnabled(event.target.checked);
+  if (event.target.checked) {
+    try { await museumAudio.initialize(); updateAudioStatus('Spatial exhibit cues are enabled; select an exhibit to hear its positional locator tone.'); }
+    catch (error) { event.target.checked = false; museumAudio.setCuesEnabled(false); updateAudioStatus(`Could not start browser audio: ${error.message}`, 'error'); }
+  } else updateAudioStatus('Spatial exhibit cues are off.');
+});
+$('open-ar').addEventListener('click', async () => {
+  $('experience-modal').classList.add('hidden'); controls.unlock(); $('ar-modal').classList.remove('hidden');
+  $('ar-exhibit-select').value = arRuntime.selectedFile;
+  await Promise.all([loadARModel(arRuntime.selectedFile), updateARSupport()]);
+});
+$('ar-exhibit-select').addEventListener('change', async event => {
+  arRuntime.selectedFile = event.target.value; arRuntime.placed = false; arPlacedRoot.clear(); arPlacedRoot.visible = false;
+  await loadARModel(event.target.value);
+});
+$('ar-place-button').addEventListener('click', placeARExhibit);
+$('guide-listen').addEventListener('click', toggleGuideRecognition);
 $('guide-form').addEventListener('submit', event => {
   event.preventDefault();
   const question = $('guide-input').value.trim();
@@ -834,13 +1182,10 @@ document.querySelectorAll('[data-question]').forEach(button => button.addEventLi
   $('guide-answer').textContent = guideResponse(button.dataset.question);
 }));
 $('guide-speak').addEventListener('click', () => {
-  if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
-    showToast('VOICE NARRATION IS NOT AVAILABLE IN THIS BROWSER'); return;
-  }
-  speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance($('guide-answer').textContent);
-  utterance.rate = .95; utterance.pitch = 1.02; utterance.lang = document.documentElement.lang || 'en';
-  speechSynthesis.speak(utterance);
+  speakMuseumText($('guide-answer').textContent);
+});
+$('info-narrate').addEventListener('click', () => {
+  if (selected) speakMuseumText(`${selected.name}. ${selected.description}`);
 });
 $('timeline-visit').addEventListener('click', () => {
   const section = sections.find(item => item.id === $('timeline-visit').dataset.section);
@@ -855,7 +1200,17 @@ $('vr-status-button').addEventListener('click', async () => {
 });
 $('vr-recheck').addEventListener('click', updateVRDiagnostics);
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => {
-  $(b.dataset.close).classList.add('hidden');
+  const id = b.dataset.close;
+  if (id === 'ar-modal' && arRuntime.session) { arRuntime.session.end(); return; }
+  $(id).classList.add('hidden');
+  if (id === 'guide-modal' && speechRecognizer) { speechRecognizer.stop(); speechRecognizer = null; $('guide-listen').textContent = '◉ ASK BY VOICE'; }
+  if (id === 'guide-modal' && 'speechSynthesis' in window) speechSynthesis.cancel();
+  if (id === 'war-room-modal' || id === 'simulation-modal') {
+    warRoom.root.visible = false;
+    if (scenarioTimer) clearInterval(scenarioTimer);
+    scenarioTimer = null; scenarioPlaying = false;
+    $('scenario-play').querySelector('span').textContent = 'PLAY TIMELINE'; $('scenario-play').querySelector('.arrow').textContent = '▶';
+  }
   if (!selected && active && !renderer.xr.isPresenting) requestDesktopLook();
 }));
 $('close-info').addEventListener('click', () => {
@@ -864,6 +1219,10 @@ $('close-info').addEventListener('click', () => {
 });
 $('exit-button').addEventListener('click', () => {
   controls.unlock(); active = false; cameraTransition = null; clearSelection();
+  if (speechRecognizer) { speechRecognizer.stop(); speechRecognizer = null; }
+  window.speechSynthesis?.cancel?.();
+  multiplayer.leave(false).then(() => { multiplayerConnected = false; });
+  museumAudio.setAmbientEnabled(false).catch(() => {});
   const session = renderer.xr.getSession(); if (session) session.end();
   $('hud').classList.add('hidden'); $('welcome').classList.remove('hidden');
 });
