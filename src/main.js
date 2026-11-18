@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { PointerLockControls } from 'three/addons/controls/PointerLockControls.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
+import { VRButton } from 'three/addons/webxr/VRButton.js';
 import t80Url from '../t-80u_t-80um-2_all_versions__broken_arrow.glb?url';
 import bombB28Url from '../b28fi_thermonuclear_bomb.glb?url';
 import centauroUrl from '../centauro_2_p_tank_destroyer.glb?url';
@@ -26,12 +27,23 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 let renderScale = Math.min(devicePixelRatio, 1.35);
 renderer.setPixelRatio(renderScale);
 renderer.setSize(innerWidth, innerHeight);
+renderer.xr.enabled = true;
+renderer.xr.setReferenceSpaceType('local-floor');
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.12;
 const controls = new PointerLockControls(camera, document.body);
+const playerRig = new THREE.Group();
+playerRig.add(camera);
+scene.add(playerRig);
+const vrButton = VRButton.createButton(renderer, { optionalFeatures: ['hand-tracking'] });
+vrButton.id = 'VRButton';
+vrButton.className = 'icon-button vr-button';
+vrButton.setAttribute('aria-label', 'Enter immersive VR');
+Object.assign(vrButton.style, { position: 'relative', bottom: 'auto', left: 'auto', width: 'auto', borderRadius: '0', zIndex: '4', opacity: '1' });
+document.querySelector('.top-actions').prepend(vrButton);
 const clock = new THREE.Clock();
 const loader = new GLTFLoader();
 const raycaster = new THREE.Raycaster();
@@ -77,15 +89,19 @@ const exhibitMeshes = [];
 const loaded = new Set();
 const loading = new Map();
 const keys = new Set();
+const xrControllers = [];
 let active = false;
 let selected = null;
 let selectedBox = null;
 let drag = null;
+let fallbackLook = false;
 let lastLoadCheck = 0;
-let animationId = 0;
 let frameSampleMs = 0;
 let frameSampleCount = 0;
 let adaptiveCheckAt = 0;
+let animationRunning = false;
+let nextSnapTurnAt = 0;
+let vrPanel = null;
 
 function box(parent, w, h, d, x, y, z, material, cast = false, receive = true) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -159,6 +175,7 @@ function makeExhibit(e) {
   const group = new THREE.Group(); group.position.set(e.x, 0, e.z); group.userData.exhibit = e;
   const radius = e.size * .66;
   const platform = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius * 1.04, .38, 40), mats.plinth);
+  platform.userData.exhibit = e;
   platform.position.y = .21; platform.receiveShadow = true; platform.castShadow = true; group.add(platform);
   const rim = new THREE.Mesh(new THREE.TorusGeometry(radius * .95, .045, 8, 40), mats.gold);
   rim.rotation.x = Math.PI / 2; rim.position.y = .42; group.add(rim);
@@ -174,6 +191,7 @@ function makeExhibit(e) {
     const frame = new THREE.LineSegments(edges, new THREE.LineBasicMaterial({ color: 0x8f9a89, transparent: true, opacity: .56 }));
     frame.position.y = .5 + h / 2; group.add(frame);
     const cover = new THREE.Mesh(new THREE.BoxGeometry(w, h, w), mats.glass); cover.position.copy(frame.position); group.add(cover);
+    cover.userData.exhibit = e;
   }
   const plaque = new THREE.Group(); plaque.position.set(0, .28, radius * .78); group.add(plaque);
   box(plaque, Math.min(radius * 1.3, 2.8), .42, .09, 0, .35, 0, mats.dark);
@@ -193,6 +211,121 @@ function makeExhibit(e) {
 function coverMesh(group) { return group.children.find(o => o.isMesh && o.material === mats.glass) || group.children.find(o => o.geometry?.type === 'CylinderGeometry'); }
 
 function buildExhibits() { exhibits.forEach(makeExhibit); }
+
+function createVRInfoPanel() {
+  vrPanel = new THREE.Group();
+  const background = new THREE.Mesh(new THREE.PlaneGeometry(2.25, 1.22), new THREE.MeshBasicMaterial({ color: 0x111a13, transparent: true, opacity: .94, side: THREE.DoubleSide }));
+  background.position.z = -.015; vrPanel.add(background);
+  const textCanvas = document.createElement('canvas'); textCanvas.width = 1024; textCanvas.height = 560;
+  const texture = new THREE.CanvasTexture(textCanvas); texture.colorSpace = THREE.SRGBColorSpace;
+  const text = new THREE.Mesh(new THREE.PlaneGeometry(2.12, 1.1), new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide }));
+  text.position.z = .005; vrPanel.add(text);
+  vrPanel.userData.canvas = textCanvas; vrPanel.userData.texture = texture;
+  vrPanel.visible = false; scene.add(vrPanel);
+}
+
+function updateVRInfoPanel(exhibit) {
+  if (!vrPanel) return;
+  const ctx = vrPanel.userData.canvas.getContext('2d');
+  ctx.clearRect(0, 0, 1024, 560);
+  ctx.fillStyle = '#c5a566'; ctx.fillRect(0, 0, 9, 560);
+  ctx.fillStyle = '#c5a566'; ctx.font = '700 25px Arial'; ctx.fillText(exhibit.category, 42, 66);
+  ctx.fillStyle = '#f2f0e7'; ctx.font = '700 48px Arial'; ctx.fillText(exhibit.name, 42, 132, 930);
+  ctx.fillStyle = '#c4cbbf'; ctx.font = '30px Arial';
+  const words = exhibit.description.split(' '); let line = ''; let y = 194;
+  for (const word of words) {
+    const next = line ? `${line} ${word}` : word;
+    if (ctx.measureText(next).width > 925 && line) { ctx.fillText(line, 42, y); line = word; y += 44; }
+    else line = next;
+  }
+  if (line && y < 530) ctx.fillText(line, 42, y);
+  ctx.fillStyle = '#d0b87f'; ctx.font = '700 22px Arial'; ctx.fillText('HOLD TRIGGER + MOVE TO ROTATE · TRIGGER TO SELECT', 42, 535);
+  vrPanel.userData.texture.needsUpdate = true;
+  vrPanel.visible = renderer.xr.isPresenting;
+}
+
+function getVisitorPosition(target = new THREE.Vector3()) {
+  if (renderer.xr.isPresenting) return renderer.xr.getCamera(camera).getWorldPosition(target);
+  return camera.getWorldPosition(target);
+}
+
+function setupXRControllers() {
+  const rayGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
+  for (let index = 0; index < 2; index++) {
+    const controller = renderer.xr.getController(index);
+    const ray = new THREE.Line(rayGeometry, new THREE.LineBasicMaterial({ color: 0xd9bd7b, transparent: true, opacity: .88 }));
+    ray.name = 'controller-ray'; ray.scale.z = 12; controller.add(ray); controller.visible = false;
+    controller.addEventListener('connected', event => { controller.userData.handedness = event.data.handedness; });
+    controller.addEventListener('disconnected', () => { controller.userData.handedness = null; });
+    controller.addEventListener('select', () => selectFromController(controller));
+    controller.addEventListener('selectstart', () => {
+      if (!renderer.xr.isPresenting || !selected) return;
+      controller.userData.rotatingFile = selected.file;
+      controller.userData.rotationMoved = false;
+      controller.userData.previousRotation = controller.getWorldQuaternion(new THREE.Quaternion());
+    });
+    controller.addEventListener('selectend', () => {
+      controller.userData.suppressNextSelection = !!controller.userData.rotationMoved;
+      controller.userData.rotatingFile = null;
+    });
+    scene.add(controller); xrControllers.push(controller);
+  }
+}
+
+function selectFromController(controller) {
+  if (controller.userData.suppressNextSelection) { controller.userData.suppressNextSelection = false; return; }
+  controller.updateMatrixWorld(true);
+  const origin = new THREE.Vector3().setFromMatrixPosition(controller.matrixWorld);
+  const direction = new THREE.Vector3(0, 0, -1).applyQuaternion(controller.getWorldQuaternion(new THREE.Quaternion())).normalize();
+  raycaster.ray.set(origin, direction); raycaster.near = .05; raycaster.far = 18;
+  const hits = raycaster.intersectObjects(exhibitMeshes, false);
+  const exhibit = hits.find(hit => hit.object.userData.exhibit)?.object.userData.exhibit;
+  if (exhibit) selectExhibit(exhibit);
+  else if (selected) clearSelection();
+}
+
+function updateXRModelRotation() {
+  for (const controller of xrControllers) {
+    const file = controller.userData.rotatingFile;
+    if (!file) continue;
+    const root = exhibitRoots.get(file);
+    if (!root) continue;
+    const current = controller.getWorldQuaternion(new THREE.Quaternion());
+    const delta = current.clone().multiply(controller.userData.previousRotation.clone().invert());
+    const rotation = new THREE.Euler().setFromQuaternion(delta, 'YXZ');
+    if (Math.abs(rotation.x) + Math.abs(rotation.y) > .003) controller.userData.rotationMoved = true;
+    root.rotation.y -= rotation.y;
+    root.rotation.x = THREE.MathUtils.clamp(root.rotation.x + rotation.x, -.35, .35);
+    controller.userData.previousRotation.copy(current);
+  }
+}
+
+function applyVRMovement(dt) {
+  const session = renderer.xr.getSession();
+  if (!session) return;
+  const forward = renderer.xr.getCamera(camera).getWorldDirection(new THREE.Vector3());
+  forward.y = 0; if (forward.lengthSq() < .001) return; forward.normalize();
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+  const deadzone = value => Math.abs(value) < .16 ? 0 : Math.sign(value) * (Math.abs(value) - .16) / .84;
+  let moveX = 0, moveY = 0, turn = 0;
+  for (const source of session.inputSources) {
+    const pad = source.gamepad;
+    if (!pad) continue;
+    const axisX = deadzone(pad.axes[pad.axes.length >= 4 ? 2 : 0] ?? 0);
+    const axisY = deadzone(pad.axes[pad.axes.length >= 4 ? 3 : 1] ?? 0);
+    if (source.handedness === 'left') { moveX = axisX; moveY = axisY; }
+    if (source.handedness === 'right') turn = axisX;
+  }
+  const speed = 2.35 * dt;
+  const delta = right.multiplyScalar(moveX * speed).addScaledVector(forward, -moveY * speed);
+  const candidateX = playerRig.position.x + delta.x, candidateZ = playerRig.position.z + delta.z;
+  if (!collided(candidateX, candidateZ)) playerRig.position.add(delta);
+  const now = performance.now();
+  if (Math.abs(turn) > .72 && now > nextSnapTurnAt) {
+    playerRig.rotation.y -= Math.sign(turn) * Math.PI / 6;
+    nextSnapTurnAt = now + 520;
+  }
+}
 
 function mergeStaticArchitecture() {
   const buckets = new Map();
@@ -258,10 +391,10 @@ function setSectionNav() {
   for (const s of sections) {
     const button = document.createElement('button'); button.className = 'nav-button'; button.textContent = s.short;
     button.addEventListener('click', () => {
-      selected = null; $('info-card').classList.add('hidden');
+      clearSelection();
       camera.position.set(s.x, 1.68, 10); camera.rotation.set(0, 0, 0);
       $('location-name').textContent = s.title; updateNav(s.id);
-      if (!controls.isLocked) controls.lock(); ensureNearby();
+      if (!controls.isLocked) requestDesktopLook(); ensureNearby();
     });
     nav.appendChild(button);
   }
@@ -273,7 +406,7 @@ function showToast(message) {
 }
 
 function ensureNearby() {
-  const p = camera.position;
+  const p = getVisitorPosition();
   const candidates = exhibits.map(e => ({ e, d: Math.hypot(p.x - e.x, p.z - e.z) })).filter(v => v.d < 20).sort((a, b) => a.d - b.d);
   // Stage just the nearest pair; the next nearest assets stream in as the visitor moves.
   for (const { e } of candidates.slice(0, 2)) loadExhibit(e);
@@ -289,7 +422,26 @@ function selectExhibit(e) {
   $('info-title').textContent = e.name;
   $('info-description').textContent = e.description;
   $('info-card').classList.remove('hidden');
-  controls.unlock(); $('hint').textContent = 'DRAG TO ROTATE THE MODEL · CLICK TO RETURN';
+  updateVRInfoPanel(e);
+  if (!renderer.xr.isPresenting) {
+    controls.unlock(); $('hint').textContent = 'DRAG TO ROTATE THE MODEL · CLICK TO RETURN';
+  }
+}
+
+function requestDesktopLook() {
+  if (typeof document.body.requestPointerLock === 'function') {
+    controls.lock();
+    return;
+  }
+  fallbackLook = true;
+  $('hint').textContent = 'DRAG TO LOOK · WASD TO MOVE · CLICK AN EXHIBIT TO INSPECT';
+}
+
+function clearSelection() {
+  selected = null;
+  $('info-card').classList.add('hidden');
+  if (selectedBox) { scene.remove(selectedBox); selectedBox = null; }
+  if (vrPanel) vrPanel.visible = false;
 }
 
 function onCanvasClick(event) {
@@ -302,18 +454,30 @@ function onCanvasClick(event) {
   const hits = raycaster.intersectObjects(exhibitMeshes, false);
   const e = hits.find(h => h.object.userData.exhibit)?.object.userData.exhibit;
   if (e) selectExhibit(e);
-  else if (!controls.isLocked && !selected) controls.lock();
+  else if (!controls.isLocked && !selected) requestDesktopLook();
 }
 canvas.addEventListener('click', onCanvasClick);
 canvas.addEventListener('pointerdown', (event) => {
-  if (!selected || controls.isLocked || event.button !== 0) return;
-  drag = { x: event.clientX, y: event.clientY, moved: false };
+  if (event.button !== 0) return;
+  if (!selected && fallbackLook && active && !controls.isLocked) {
+    drag = { x: event.clientX, y: event.clientY, moved: false, mode: 'look' };
+    canvas.setPointerCapture(event.pointerId); return;
+  }
+  if (!selected || controls.isLocked) return;
+  drag = { x: event.clientX, y: event.clientY, moved: false, mode: 'inspect' };
   canvas.setPointerCapture(event.pointerId);
 });
 canvas.addEventListener('pointermove', (event) => {
-  if (!drag || !selected) return;
+  if (!drag) return;
   const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
   if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
+  if (drag.mode === 'look') {
+    const euler = new THREE.Euler().setFromQuaternion(camera.quaternion, 'YXZ');
+    euler.y -= dx * .004; euler.x = THREE.MathUtils.clamp(euler.x - dy * .004, -1.52, 1.52);
+    camera.quaternion.setFromEuler(euler);
+    drag.x = event.clientX; drag.y = event.clientY; return;
+  }
+  if (!selected) return;
   const root = exhibitRoots.get(selected.file);
   if (root) { root.rotation.y += dx * .009; root.rotation.x = THREE.MathUtils.clamp(root.rotation.x + dy * .004, -.35, .35); }
   drag.x = event.clientX; drag.y = event.clientY;
@@ -338,11 +502,22 @@ function collided(x, z) {
   return false;
 }
 function tick() {
-  animationId = 0;
   if (!active) return;
-  animationId = requestAnimationFrame(tick);
   const dt = Math.min(clock.getDelta(), .045);
-  if (controls.isLocked && !selected) {
+  if (renderer.xr.isPresenting) {
+    applyVRMovement(dt);
+    updateXRModelRotation();
+    const p = getVisitorPosition();
+    const current = sections.reduce((a, b) => Math.abs(b.x - p.x) < Math.abs(a.x - p.x) ? b : a);
+    $('location-name').textContent = current.title; updateNav(current.id);
+    if (performance.now() - lastLoadCheck > 800) { lastLoadCheck = performance.now(); ensureNearby(); }
+    if (selected && vrPanel) {
+      const exhibit = selected;
+      const toward = new THREE.Vector3(p.x - exhibit.x, 0, p.z - exhibit.z).normalize();
+      vrPanel.position.set(exhibit.x + toward.x * 1.7, Math.min(exhibit.size * .68 + 1.2, 7.5), exhibit.z + toward.z * 1.7);
+      vrPanel.lookAt(p.x, vrPanel.position.y, p.z);
+    }
+  } else if ((controls.isLocked || fallbackLook) && !selected) {
     const speed = 6.1 * dt;
     const old = camera.position.clone();
     if (keys.has('KeyW') || keys.has('ArrowUp')) controls.moveForward(speed);
@@ -369,7 +544,33 @@ function tick() {
   }
 }
 
-buildArchitecture(); buildExhibits(); mergeStaticArchitecture(); setSectionNav();
+function startRendering() {
+  if (animationRunning) return;
+  animationRunning = true; clock.start(); renderer.setAnimationLoop(tick);
+}
+function stopRendering() {
+  if (!animationRunning) return;
+  animationRunning = false; renderer.setAnimationLoop(null);
+}
+
+buildArchitecture(); buildExhibits(); mergeStaticArchitecture(); setSectionNav(); createVRInfoPanel(); setupXRControllers();
+renderer.xr.addEventListener('sessionstart', () => {
+  const startX = camera.position.x, startZ = camera.position.z, yaw = camera.rotation.y;
+  playerRig.position.set(startX, 0, startZ); playerRig.rotation.set(0, yaw, 0);
+  camera.position.set(0, 0, 0); camera.rotation.set(0, 0, 0);
+  xrControllers.forEach(controller => { controller.visible = true; });
+  vrButton.setAttribute('aria-label', 'Exit immersive VR');
+  $('hint').textContent = 'LEFT STICK MOVE · RIGHT STICK TURN · TRIGGER SELECT · HOLD + MOVE TO ROTATE';
+});
+renderer.xr.addEventListener('sessionend', () => {
+  camera.position.set(playerRig.position.x, 1.68, playerRig.position.z);
+  camera.rotation.set(0, playerRig.rotation.y, 0);
+  playerRig.position.set(0, 0, 0); playerRig.rotation.set(0, 0, 0);
+  xrControllers.forEach(controller => { controller.visible = false; });
+  if (vrPanel) vrPanel.visible = false;
+  vrButton.setAttribute('aria-label', 'Enter immersive VR');
+  $('hint').textContent = 'CLICK TO LOOK AROUND · WASD TO MOVE';
+});
 window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setPixelRatio(renderScale); renderer.setSize(innerWidth, innerHeight);
@@ -378,23 +579,30 @@ window.addEventListener('keydown', e => { keys.add(e.code); if (e.code === 'Esca
 window.addEventListener('keyup', e => keys.delete(e.code));
 controls.addEventListener('lock', () => { $('hint').textContent = 'WASD TO MOVE · CLICK AN EXHIBIT TO INSPECT · ESC TO PAUSE'; });
 controls.addEventListener('unlock', () => { if (active && !selected) $('hint').textContent = 'CLICK TO LOOK AROUND · WASD TO MOVE'; });
+document.addEventListener('pointerlockerror', () => {
+  if (!active || renderer.xr.isPresenting) return;
+  fallbackLook = true;
+  $('hint').textContent = 'DRAG TO LOOK · WASD TO MOVE · CLICK AN EXHIBIT TO INSPECT';
+});
 $('enter-button').addEventListener('click', async () => {
   $('welcome').classList.add('hidden'); $('loading').classList.remove('hidden');
   active = true;
-  if (!animationId) tick();
+  startRendering();
+  requestDesktopLook();
   const initial = [exhibits.find(e => e.file === 'low-poly_hk_g3.glb')];
   progress('Opening the museum…', 4);
   await Promise.all(initial.map(e => loadExhibit(e)));
   progress('Gallery ready', 100);
-  setTimeout(() => { $('loading').classList.add('hidden'); $('hud').classList.remove('hidden'); controls.lock(); }, 380);
+  setTimeout(() => { $('loading').classList.add('hidden'); $('hud').classList.remove('hidden'); }, 380);
 });
 $('help-button').addEventListener('click', () => { controls.unlock(); $('help-modal').classList.remove('hidden'); });
-document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => { $(b.dataset.close).classList.add('hidden'); if (!selected) controls.lock(); }));
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => { $(b.dataset.close).classList.add('hidden'); if (!selected) requestDesktopLook(); }));
 $('close-info').addEventListener('click', () => {
-  $('info-card').classList.add('hidden'); selected = null;
-  if (selectedBox) scene.remove(selectedBox); selectedBox = null;
-  controls.lock(); $('hint').textContent = 'WASD TO MOVE · CLICK AN EXHIBIT TO INSPECT · ESC TO PAUSE';
+  clearSelection();
+  requestDesktopLook(); $('hint').textContent = fallbackLook ? 'DRAG TO LOOK · WASD TO MOVE · CLICK AN EXHIBIT TO INSPECT' : 'WASD TO MOVE · CLICK AN EXHIBIT TO INSPECT · ESC TO PAUSE';
 });
 $('exit-button').addEventListener('click', () => {
-  controls.unlock(); active = false; if (animationId) cancelAnimationFrame(animationId); animationId = 0; selected = null; $('info-card').classList.add('hidden'); $('hud').classList.add('hidden'); $('welcome').classList.remove('hidden');
+  controls.unlock(); active = false; clearSelection(); stopRendering();
+  const session = renderer.xr.getSession(); if (session) session.end();
+  $('hud').classList.add('hidden'); $('welcome').classList.remove('hidden');
 });
