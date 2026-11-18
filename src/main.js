@@ -48,6 +48,38 @@ const clock = new THREE.Clock();
 const loader = new GLTFLoader();
 const raycaster = new THREE.Raycaster();
 
+async function updateVRDiagnostics() {
+  const status = $('vr-diagnostic-status');
+  const detail = $('vr-diagnostic-detail');
+  status.textContent = 'Checking secure context and immersive-vr support…';
+  detail.textContent = '';
+
+  if (!window.isSecureContext) {
+    status.textContent = 'VR unavailable: this page is not in a secure context.';
+    detail.textContent = 'WebXR immersive sessions require HTTPS (or localhost). Open the museum from its HTTPS GitHub Pages address.';
+    return;
+  }
+  if (!navigator.xr || typeof navigator.xr.isSessionSupported !== 'function') {
+    status.textContent = 'VR unavailable: this browser does not expose the WebXR API.';
+    detail.textContent = 'Use a WebXR-compatible browser on a supported headset, such as Meta Quest Browser on a Quest headset. A desktop browser may expose WebXR while still lacking an immersive VR runtime.';
+    return;
+  }
+
+  try {
+    const supported = await navigator.xr.isSessionSupported('immersive-vr');
+    if (supported) {
+      status.textContent = 'Immersive VR is available in this browser.';
+      detail.textContent = 'Select ENTER VR to request a real immersive-vr session. If the request is rejected, the browser will report that separately.';
+    } else {
+      status.textContent = 'VR unavailable: the browser reports no immersive-vr session support.';
+      detail.textContent = 'This result is common on laptops without a connected headset and active OpenXR/WebXR runtime, and can also reflect browser or platform limitations. It does not prove a project error. Try the HTTPS site in Meta Quest Browser while wearing an awake Quest headset, then recheck.';
+    }
+  } catch (error) {
+    status.textContent = `VR capability check failed${error?.name ? ` (${error.name})` : ''}.`;
+    detail.textContent = error?.message || 'The browser could not query its immersive VR runtime. Check browser permissions, headset connection, and runtime availability.';
+  }
+}
+
 const sections = [
   { id: 'armour', title: 'ARMOURED FORCES', short: 'ARMOURED FORCES', x: -31 },
   { id: 'air', title: 'AIR POWER', short: 'AIR POWER', x: -15 },
@@ -596,6 +628,12 @@ $('enter-button').addEventListener('click', async () => {
   setTimeout(() => { $('loading').classList.add('hidden'); $('hud').classList.remove('hidden'); }, 380);
 });
 $('help-button').addEventListener('click', () => { controls.unlock(); $('help-modal').classList.remove('hidden'); });
+$('vr-status-button').addEventListener('click', async () => {
+  controls.unlock();
+  $('vr-status-modal').classList.remove('hidden');
+  await updateVRDiagnostics();
+});
+$('vr-recheck').addEventListener('click', updateVRDiagnostics);
 document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => { $(b.dataset.close).classList.add('hidden'); if (!selected) requestDesktopLook(); }));
 $('close-info').addEventListener('click', () => {
   clearSelection();
