@@ -46,8 +46,7 @@ const vrButton = VRButton.createButton(renderer, { optionalFeatures: ['hand-trac
 vrButton.id = 'VRButton';
 vrButton.className = 'icon-button vr-button';
 vrButton.setAttribute('aria-label', 'Enter immersive VR');
-Object.assign(vrButton.style, { position: 'relative', bottom: 'auto', left: 'auto', width: 'auto', borderRadius: '0', zIndex: '4', opacity: '1' });
-document.querySelector('.top-actions').prepend(vrButton);
+document.querySelector('.header-vr').append(vrButton);
 const arButton = ARButton.createButton(renderer, {
   requiredFeatures: ['hit-test'], optionalFeatures: ['dom-overlay'], domOverlay: { root: document.body },
 });
