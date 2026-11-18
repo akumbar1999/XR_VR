@@ -1,29 +1,27 @@
 <div align='center'>
 
-<img src='https://readme-typing-svg.demolab.com?font=Barlow+Condensed&weight=700&size=38&pause=850&color=C5A566&center=true&vCenter=true&width=780&height=72&lines=VIRTUAL+ARMY+MUSEUM;WALK+THROUGH+MILITARY+HISTORY;11+ORIGINAL+3D+EXHIBITS' alt='Animated Virtual Army Museum headline' />
+<img src='https://img.shields.io/badge/VIRTUAL-DEFENCE%20MUSEUM-06121d?style=for-the-badge&labelColor=07101b&color=48d8ef' alt='Virtual Defence Museum' />
 
-### A first-person 3D museum built around the original GLB collection.
+### An interactive, futuristic museum built around the original GLB collection.
 
 [**▶ Open the live museum**](https://akumbar1999.github.io/XR_VR/)
 
-<br />
-
-![Three.js](https://img.shields.io/badge/Three.js-0.180-1b211a?style=for-the-badge&logo=threedotjs&logoColor=c5a566)
-![Vite](https://img.shields.io/badge/Vite-7-1b211a?style=for-the-badge&logo=vite&logoColor=c5a566)
-![Exhibits](https://img.shields.io/badge/EXHIBITS-11-1b211a?style=for-the-badge&labelColor=263127&color=c5a566)
-![Deployment](https://img.shields.io/badge/DEPLOYMENT-GITHUB%20PAGES-1b211a?style=for-the-badge&logo=githubpages&logoColor=c5a566)
+![Three.js](https://img.shields.io/badge/Three.js-0.180-07101b?style=for-the-badge&logo=threedotjs&logoColor=59e3f7)
+![Vite](https://img.shields.io/badge/Vite-7-07101b?style=for-the-badge&logo=vite&logoColor=9deeff)
+![WebXR](https://img.shields.io/badge/WebXR-Meta%20Quest%20ready-07101b?style=for-the-badge&logo=meta&logoColor=59e3f7)
+![Exhibits](https://img.shields.io/badge/ORIGINAL%20EXHIBITS-11-07101b?style=for-the-badge&labelColor=0b202d&color=48d8ef)
 
 </div>
 
 ---
 
-## Enter the galleries
+## Explore the museum
 
-Explore an atmospheric, walkable exhibition hall in first person. Move between five collections, inspect the original 3D models on display, and open an information card for each artifact.
+Walk through five collection zones in a futuristic, cyan-lit exhibition hall. Original GLB models stream in as you approach. Inspect each object, read the museum notes, and rotate the model.
 
 ### Collections
 
-| Collection | Exhibits |
+| Zone | Original exhibits |
 |---|---|
 | Armoured Forces | T-80U / T-80UM-2, Leclerc AZUR, Centauro II, 2S40 Floks |
 | Air Power | J-8F Interceptor |
@@ -31,16 +29,27 @@ Explore an atmospheric, walkable exhibition hall in first person. Move between f
 | Ordnance | FAB-3000 UMPK, B-28FI, RDS-37 |
 | Defence & Field Technology | Centurion / SeaRAM, Field Observer |
 
-## Explore
+## Learn as you explore
+
+- **Offline museum guide:** Ask about exhibit names and museum controls. Replies come from bundled museum notes, with optional browser speech synthesis; there is no remote AI service.
+- **Missions:** Visit all five zones, inspect three unique exhibits, and answer three archive questions. Earn badges and a score out of 100.
+- **History timeline:** Select an event for a historical note, then visit its related collection. Reference links are shown in the timeline.
+
+## Controls
 
 | Input | Action |
 |---|---|
-| **W A S D** | Walk through the museum |
+| **W A S D** | Walk through the galleries |
 | **Mouse** | Look around |
-| **Click an exhibit** | Read its collection notes and inspect it |
-| **Drag** | Rotate the selected model |
-| **Scroll** | Zoom the selected model |
-| **Esc** | Release the mouse |
+| **Click an exhibit** | Read its museum notes |
+| **Drag / scroll** | Rotate / zoom the selected model |
+| **Escape** | Release the mouse |
+| **Quest left stick** | Walk |
+| **Quest right stick** | Snap turn |
+| **Quest trigger on exhibit** | Select or hold to rotate |
+| **Quest trigger aimed at open floor** | Teleport |
+
+Enter VR is enabled by the browser’s actual `immersive-vr` support report. Use HTTPS and a WebXR-compatible headset browser such as Meta Quest Browser.
 
 ## Run locally
 
@@ -53,28 +62,35 @@ npm ci
 npm run dev
 ```
 
-Open the local URL printed by Vite. To create a production build:
+Open the local Vite URL printed in the terminal. To verify the production output locally:
 
 ```bash
 npm run build
 npm run preview
 ```
 
-## Performance notes
+## Deploy to GitHub Pages
 
-- Exhibits load as visitors approach their display areas.
+The repository includes a GitHub Actions workflow that builds and deploys on every push to `main`.
+
+1. In GitHub, open **Settings → Pages** and choose **GitHub Actions** as the build and deployment source.
+2. Push your changes to `main` (or run **Build and deploy museum** from the Actions tab).
+3. Wait for the workflow’s build and deploy jobs to succeed. The site is published at `https://akumbar1999.github.io/XR_VR/`.
+
+The Vite base path is already configured for `/XR_VR/`, which is required for this project page.
+
+## Performance
+
+- Exhibits load on approach rather than all at startup.
 - Static gallery geometry is merged to reduce draw calls.
-- Render resolution adapts to frame time, and detailed exhibit meshes skip costly real-time shadow rendering.
-- Original GLB files are kept in the repository root and are never rewritten by the build.
+- Render resolution adapts to frame time; detailed GLB meshes avoid expensive dynamic shadows.
+- Holograms use lightweight emissive geometry and CSS motion; no additional runtime dependencies are needed.
+- Original GLB assets are kept unchanged in the repository root.
 
-## Built with
+## Stack
 
-**Three.js** · **GLTFLoader** · **PointerLockControls** · **Vite** · **GitHub Pages**
+**Three.js** · **GLTFLoader** · **WebXR / VRButton** · **PointerLockControls** · **Vite** · **GitHub Pages**
 
 ---
 
-<div align='center'>
-
-Made for curious visitors and military history enthusiasts.
-
-</div>
+<div align='center'>Made for curious visitors and students of military history.</div>

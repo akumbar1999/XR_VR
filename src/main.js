@@ -19,8 +19,8 @@ import './style.css';
 const $ = (id) => document.getElementById(id);
 const canvas = $('museum-canvas');
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x111811);
-scene.fog = new THREE.FogExp2(0x111811, 0.012);
+scene.background = new THREE.Color(0x07101b);
+scene.fog = new THREE.FogExp2(0x07101b, 0.0105);
 const camera = new THREE.PerspectiveCamera(70, innerWidth / innerHeight, 0.1, 150);
 camera.position.set(0, 1.68, 14);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
@@ -108,13 +108,13 @@ const assetUrls = new Map([
 ]);
 
 const mats = {
-  floor: new THREE.MeshStandardMaterial({ color: 0x343a34, roughness: 0.76, metalness: 0.24 }),
-  wall: new THREE.MeshStandardMaterial({ color: 0x252e27, roughness: 0.84, metalness: 0.12 }),
-  trim: new THREE.MeshStandardMaterial({ color: 0x83704c, roughness: 0.42, metalness: 0.7 }),
-  dark: new THREE.MeshStandardMaterial({ color: 0x151c17, roughness: 0.64, metalness: 0.34 }),
-  plinth: new THREE.MeshStandardMaterial({ color: 0x292f2a, roughness: 0.48, metalness: 0.45 }),
-  gold: new THREE.MeshStandardMaterial({ color: 0xb89c67, roughness: 0.4, metalness: 0.55 }),
-  glass: new THREE.MeshPhysicalMaterial({ color: 0xb6c7bc, roughness: 0.08, metalness: 0, transmission: 0.82, transparent: true, opacity: 0.19, thickness: 0.12, depthWrite: false }),
+  floor: new THREE.MeshStandardMaterial({ color: 0x121e2a, roughness: 0.72, metalness: 0.32 }),
+  wall: new THREE.MeshStandardMaterial({ color: 0x101c29, roughness: 0.82, metalness: 0.2 }),
+  trim: new THREE.MeshStandardMaterial({ color: 0x36a8c3, emissive: 0x063745, roughness: 0.36, metalness: 0.68 }),
+  dark: new THREE.MeshStandardMaterial({ color: 0x08121d, roughness: 0.58, metalness: 0.42 }),
+  plinth: new THREE.MeshStandardMaterial({ color: 0x172532, roughness: 0.44, metalness: 0.5 }),
+  gold: new THREE.MeshStandardMaterial({ color: 0x55cce3, emissive: 0x062936, roughness: 0.38, metalness: 0.55 }),
+  glass: new THREE.MeshPhysicalMaterial({ color: 0x7beeff, roughness: 0.1, metalness: 0, transmission: 0.74, transparent: true, opacity: 0.15, thickness: 0.1, depthWrite: false }),
 };
 const exhibitRoots = new Map();
 const exhibitMeshes = [];
@@ -134,6 +134,25 @@ let adaptiveCheckAt = 0;
 let animationRunning = false;
 let nextSnapTurnAt = 0;
 let vrPanel = null;
+let cameraTransition = null;
+const animatedHolograms = [];
+let introGroup = null;
+const missionState = { zones: new Set(), exhibits: new Set(), quizCorrect: 0, quizAnswered: new Set(), activeQuiz: 0, complete: false };
+const missionQuestions = [
+  { question: 'Which exhibit is identified as a Chinese supersonic interceptor?', answers: ['J-8F Interceptor', 'Leclerc AZUR', '2S40 Floks'], correct: 0 },
+  { question: 'The G3 in this collection is an example of what?', answers: ['A wheeled artillery vehicle', 'A 7.62×51 mm NATO battle rifle', 'A fighter aircraft'], correct: 1 },
+  { question: 'In what year was the RDS-37 tested?', answers: ['1945', '1955', '1965'], correct: 1 },
+];
+const timelineData = [
+  { year: '1914', title: 'First World War begins', section: 'armour', detail: 'The First World War began in Europe in 1914 and expanded into a global conflict. Industrial production and mechanized transport reshaped how armies moved and fought.' },
+  { year: '1939', title: 'Second World War begins', section: 'air', detail: 'The Second World War began in 1939. It became a global conflict involving large-scale advances in aviation, armoured vehicles, radar and communications.' },
+  { year: '1945', title: 'Second World War ends', section: 'technology', detail: 'The Second World War ended in 1945. The postwar period brought major changes to international institutions, military alliances and defence technology.' },
+  { year: '1955', title: 'RDS-37 test', section: 'ordnance', detail: 'The Soviet Union tested RDS-37 in 1955. This exhibit is part of the museum’s ordnance collection and represents the history of nuclear weapons.' },
+  { year: '1955', title: 'Warsaw Pact formed', section: 'armour', detail: 'The Warsaw Pact was established in 1955 as a military alliance of the Soviet Union and several Eastern European states.' },
+  { year: '1957', title: 'Sputnik 1 launched', section: 'air', detail: 'Sputnik 1, the first artificial Earth satellite, was launched by the Soviet Union in 1957, beginning the space age and accelerating the space race.' },
+  { year: '1989', title: 'Berlin Wall opens', section: 'technology', detail: 'The Berlin Wall opened in November 1989, a major event in the political changes that transformed Europe at the end of the Cold War.' },
+  { year: '1991', title: 'Soviet Union dissolves', section: 'armour', detail: 'The Soviet Union dissolved in 1991. The T-80 family in the armoured collection was developed during the Soviet era.' },
+];
 
 function box(parent, w, h, d, x, y, z, material, cast = false, receive = true) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
@@ -144,7 +163,7 @@ function addText(parent, text, width, height, x, y, z) {
   const ctx = c.getContext('2d');
   ctx.fillStyle = '#121914'; ctx.fillRect(0, 0, c.width, c.height);
   ctx.fillStyle = '#bb9d64'; ctx.fillRect(0, 0, 10, c.height);
-  ctx.fillStyle = '#d1b679'; ctx.font = '600 33px Arial'; ctx.letterSpacing = '7px'; ctx.fillText('VIRTUAL ARMY MUSEUM  /  COLLECTION', 45, 67);
+  ctx.fillStyle = '#69d9ec'; ctx.font = '600 33px Arial'; ctx.letterSpacing = '7px'; ctx.fillText('VIRTUAL DEFENCE MUSEUM  /  COLLECTION', 45, 67);
   ctx.fillStyle = '#f0eee5'; ctx.font = 'bold 83px Arial'; ctx.letterSpacing = '3px'; ctx.fillText(text.toUpperCase(), 45, 170);
   const texture = new THREE.CanvasTexture(c); texture.colorSpace = THREE.SRGBColorSpace;
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }));
@@ -169,9 +188,9 @@ function buildArchitecture() {
   for (let x = -40; x <= 40; x += 16) {
     box(scene, .28, .38, 34, x, 11.8, 0, mats.trim);
     box(scene, .24, .7, 34, x, 10.8, 0, mats.dark);
-    const light = new THREE.PointLight(0xe5d9b6, 125, 20, 1.65);
+    const light = new THREE.PointLight(0x55dfff, 92, 20, 1.65);
     light.position.set(x, 10.35, 0); scene.add(light);
-    const lum = new THREE.Mesh(new THREE.BoxGeometry(1.25, .12, 4.6), new THREE.MeshBasicMaterial({ color: 0xffedc4 }));
+    const lum = new THREE.Mesh(new THREE.BoxGeometry(1.25, .12, 4.6), new THREE.MeshBasicMaterial({ color: 0x73edff }));
     lum.position.set(x, 11.16, 0); scene.add(lum);
   }
   // Separate collection bays with open central thresholds.
@@ -194,9 +213,9 @@ function buildArchitecture() {
   seal.position.set(0, .015, 12); scene.add(seal);
   const sealRing = new THREE.Mesh(new THREE.TorusGeometry(3.2, .035, 8, 64), mats.gold);
   sealRing.rotation.x = Math.PI / 2; sealRing.position.set(0, .05, 12); scene.add(sealRing);
-  const hemi = new THREE.HemisphereLight(0xbfcdbf, 0x25291f, 1.35); scene.add(hemi);
-  const ambient = new THREE.AmbientLight(0xc1c5ad, .28); scene.add(ambient);
-  const keyLight = new THREE.DirectionalLight(0xffe3ad, 2.4);
+  const hemi = new THREE.HemisphereLight(0x9deaff, 0x101624, 1.1); scene.add(hemi);
+  const ambient = new THREE.AmbientLight(0x8fb9d0, .3); scene.add(ambient);
+  const keyLight = new THREE.DirectionalLight(0xb5eaff, 1.8);
   keyLight.position.set(-12, 18, 10); keyLight.castShadow = true;
   keyLight.shadow.mapSize.set(1024, 1024); keyLight.shadow.camera.left = -35; keyLight.shadow.camera.right = 35;
   keyLight.shadow.camera.top = 28; keyLight.shadow.camera.bottom = -28; keyLight.shadow.bias = -.0004;
@@ -215,6 +234,11 @@ function makeExhibit(e) {
   // A restrained light halo brings the plinth forward without heavy real-time spotlights.
   const halo = new THREE.Mesh(new THREE.CylinderGeometry(radius * .9, radius * .95, .035, 40), new THREE.MeshBasicMaterial({ color: 0x8d794e, transparent: true, opacity: .4 }));
   halo.position.y = .535; group.add(halo);
+  const holoRing = new THREE.Mesh(new THREE.TorusGeometry(radius * .88, .018, 6, 48), new THREE.MeshBasicMaterial({ color: 0x65eaff, transparent: true, opacity: .62, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+  holoRing.rotation.x = Math.PI / 2; holoRing.position.y = .57; group.add(holoRing);
+  const holoCore = new THREE.Mesh(new THREE.CylinderGeometry(radius * .78, radius * .78, .012, 40), new THREE.MeshBasicMaterial({ color: 0x35cce8, transparent: true, opacity: .035, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }));
+  holoCore.position.y = .55; group.add(holoCore);
+  animatedHolograms.push({ ring: holoRing, core: holoCore, phase: Math.random() * Math.PI * 2 });
   const contactShadow = new THREE.Mesh(new THREE.PlaneGeometry(radius * 1.6, radius * 1.6), contactShadowMaterial);
   contactShadow.rotation.x = -Math.PI / 2; contactShadow.position.y = .546; group.add(contactShadow);
   if (e.glass) {
@@ -312,8 +336,20 @@ function selectFromController(controller) {
   raycaster.ray.set(origin, direction); raycaster.near = .05; raycaster.far = 18;
   const hits = raycaster.intersectObjects(exhibitMeshes, false);
   const exhibit = hits.find(hit => hit.object.userData.exhibit)?.object.userData.exhibit;
-  if (exhibit) selectExhibit(exhibit);
-  else if (selected) clearSelection();
+  if (exhibit) { selectExhibit(exhibit); return; }
+  // Point at open floor and press the trigger to teleport the XR rig.
+  const floorPoint = new THREE.Vector3();
+  const floor = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  if (raycaster.ray.direction.y < -.12 && raycaster.ray.intersectPlane(floor, floorPoint)) {
+    const visitorX = floorPoint.x, visitorZ = floorPoint.z;
+    if (raycaster.ray.origin.distanceTo(floorPoint) <= 18 && !collided(visitorX, visitorZ)) {
+      playerRig.position.set(visitorX, 0, visitorZ);
+      clearSelection();
+      showToast('TELEPORTED · POINT AT THE FLOOR TO MOVE');
+      return;
+    }
+  }
+  if (selected) clearSelection();
 }
 
 function updateXRModelRotation() {
@@ -424,8 +460,30 @@ function setSectionNav() {
     const button = document.createElement('button'); button.className = 'nav-button'; button.textContent = s.short;
     button.addEventListener('click', () => {
       clearSelection();
-      camera.position.set(s.x, 1.68, 10); camera.rotation.set(0, 0, 0);
+      const pathClear = (x1, z1, x2, z2) => {
+        const steps = Math.max(1, Math.ceil(Math.hypot(x2 - x1, z2 - z1) / .65));
+        for (let i = 1; i <= steps; i++) {
+          const t = i / steps;
+          if (collided(THREE.MathUtils.lerp(x1, x2, t), THREE.MathUtils.lerp(z1, z2, t))) return false;
+        }
+        return true;
+      };
+      let route = null;
+      for (const offset of [0, -3, 3, -5, 5, -8, 8, -11, 11]) {
+        const midX = camera.position.x + offset;
+        for (const aisleZ of [3, -3]) {
+          if (pathClear(camera.position.x, camera.position.z, midX, camera.position.z)
+            && pathClear(midX, camera.position.z, midX, aisleZ)
+            && pathClear(midX, aisleZ, s.x, aisleZ)) {
+            route = [[midX, camera.position.z], [midX, aisleZ], [s.x, aisleZ]]; break;
+          }
+        }
+        if (route) break;
+      }
+      route ??= [[camera.position.x, 3], [s.x, 3]];
+      cameraTransition = { route, segment: 0, startX: camera.position.x, startZ: camera.position.z, elapsed: 0, duration: .62 };
       $('location-name').textContent = s.title; updateNav(s.id);
+      missionState.zones.add(s.id); updateMissionUI();
       if (!controls.isLocked) requestDesktopLook(); ensureNearby();
     });
     nav.appendChild(button);
@@ -435,6 +493,114 @@ function updateNav(id) { document.querySelectorAll('.nav-button').forEach((b, i)
 function showToast(message) {
   const toast = $('toast'); toast.textContent = message; toast.classList.remove('hidden');
   clearTimeout(showToast.timer); showToast.timer = setTimeout(() => toast.classList.add('hidden'), 3800);
+}
+
+function visitZone(id) {
+  if (!id || missionState.zones.has(id)) return;
+  missionState.zones.add(id);
+  updateMissionUI();
+}
+
+function renderMissionQuiz() {
+  const index = missionQuestions.findIndex((_, i) => !missionState.quizAnswered.has(i));
+  const questionNode = $('quiz-question'), answersNode = $('quiz-answers');
+  answersNode.replaceChildren();
+  $('quiz-feedback').textContent = '';
+  if (index === -1) {
+    questionNode.textContent = 'Archive checks complete. Your answers and discoveries are saved for this visit.';
+    return;
+  }
+  missionState.activeQuiz = index;
+  const item = missionQuestions[index];
+  questionNode.textContent = `${index + 1} / ${missionQuestions.length} · ${item.question}`;
+  item.answers.forEach((answer, answerIndex) => {
+    const button = document.createElement('button');
+    button.className = 'quiz-answer'; button.type = 'button'; button.textContent = answer;
+    button.addEventListener('click', () => {
+      if (answerIndex === item.correct) {
+        button.classList.add('correct');
+        missionState.quizAnswered.add(index); missionState.quizCorrect++;
+        $('quiz-feedback').textContent = 'Correct. Answer recorded.';
+        updateMissionUI();
+        window.setTimeout(renderMissionQuiz, 650);
+      } else {
+        button.classList.add('incorrect'); button.disabled = true;
+        $('quiz-feedback').textContent = 'Not quite. Try another answer.';
+        const options = Array.from(answersNode.querySelectorAll('.quiz-answer'));
+        if (options.every(option => option.disabled)) {
+          $('quiz-feedback').textContent = 'No correct answer selected. Resetting this question…';
+          window.setTimeout(() => {
+            options.forEach(option => { option.disabled = false; option.classList.remove('incorrect'); });
+            $('quiz-feedback').textContent = 'Try the question again.';
+          }, 900);
+        }
+      }
+    });
+    answersNode.appendChild(button);
+  });
+}
+
+function updateMissionUI() {
+  if (!$('mission-zones-count')) return;
+  const zones = missionState.zones.size, artifacts = missionState.exhibits.size, knowledge = missionState.quizCorrect;
+  $('mission-zones-count').textContent = `${Math.min(zones, 5)} / 5`;
+  $('mission-exhibits-count').textContent = `${Math.min(artifacts, 3)} / 3`;
+  $('mission-quiz-count').textContent = `${Math.min(knowledge, 3)} / 3`;
+  const score = Math.round(Math.min(zones, 5) * 8 + Math.min(artifacts, 3) * 10 + Math.min(knowledge, 3) * 10);
+  $('mission-score').innerHTML = `SCORE <strong>${score}</strong> / 100`;
+  const unlocked = [zones >= 5, artifacts >= 3, zones >= 5 && artifacts >= 3 && knowledge >= 3];
+  $('mission-badges').querySelectorAll('.badge').forEach((badge, index) => badge.classList.toggle('locked', !unlocked[index]));
+  const complete = unlocked[2];
+  if (complete && !missionState.complete) showToast('MISSION COMPLETE · ARCHIVE EXPERT BADGE EARNED');
+  missionState.complete = complete;
+}
+
+function guideResponse(question) {
+  const query = question.toLowerCase();
+  const normalizedQuery = query.replace(/[^a-z0-9]/g, '');
+  const exhibit = exhibits.find(item => {
+    const titleAlias = item.name.split(/[ /]/)[0].toLowerCase().replace(/[^a-z0-9]/g, '');
+    const titleKey = item.name.toLowerCase().replace(/[^a-z0-9]/g, '');
+    return (titleAlias.length > 2 && normalizedQuery.includes(titleAlias)) || normalizedQuery.includes(titleKey) || item.file.toLowerCase().split('.')[0].split(/[_-]+/).filter(part => part.length > 2).some(part => query.includes(part));
+  });
+  if (exhibit) return `${exhibit.name} · ${exhibit.category}. ${exhibit.description}`;
+  if (/vr|quest|controller|teleport/.test(query)) return 'In WebXR, use the left controller stick to walk and the right stick to snap-turn. Aim at an open patch of floor and press the trigger to teleport. Aim at an exhibit and press the trigger to inspect it. VR availability depends on your browser and headset runtime.';
+  if (/mission|quiz|score|badge/.test(query)) return 'Mission Control tracks five visited collection zones, three different exhibits inspected, and three correct archive checks. Complete every objective to earn the Archive Expert badge and a score of 100.';
+  if (/where|navigate|move|walk|gallery|section|zone/.test(query)) return 'Use W A S D to walk, move the mouse to look, and choose a collection tab at the top to travel to its gallery. On a Quest, use the left stick or point at the floor and trigger to teleport.';
+  if (/history|timeline|event|year/.test(query)) return 'Open History in the top bar to explore a short, sourced timeline. Select an event to read its note and visit the related museum collection.';
+  if (/hello|hi\b|help|guide/.test(query)) return 'I can explain the eleven exhibits using the museum’s built-in descriptions, explain controls, or help with Missions and the History Timeline. My answers are local guide notes, not generated by a connected AI.';
+  return 'I do not have a built-in note for that question yet. Try an exhibit name such as T-80U, Leclerc, J-8F, G3, RDS-37, Centauro, Floks or SeaRAM.';
+}
+
+function buildTimeline() {
+  const container = $('timeline-events');
+  timelineData.forEach((event, index) => {
+    const button = document.createElement('button');
+    button.className = 'timeline-event'; button.type = 'button';
+    const year = document.createElement('span'); year.className = 'timeline-year'; year.textContent = event.year;
+    const title = document.createElement('span'); title.className = 'timeline-name'; title.textContent = event.title;
+    button.append(year, title);
+    button.addEventListener('click', () => {
+      container.querySelectorAll('.timeline-event').forEach(node => node.classList.remove('active'));
+      button.classList.add('active'); $('timeline-detail').textContent = event.detail;
+      $('timeline-visit').dataset.section = event.section;
+      $('timeline-visit').disabled = false;
+    });
+    container.appendChild(button);
+  });
+}
+
+function createIntroEnvironment() {
+  introGroup = new THREE.Group(); introGroup.position.set(0, 2.4, 5.7);
+  const wire = new THREE.MeshBasicMaterial({ color: 0x55dff5, wireframe: true, transparent: true, opacity: .48, toneMapped: false });
+  const core = new THREE.Mesh(new THREE.IcosahedronGeometry(1.65, 2), wire); introGroup.add(core);
+  const ringMaterial = new THREE.MeshBasicMaterial({ color: 0x88efff, transparent: true, opacity: .42, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false });
+  for (const [radius, rotation] of [[2.1, .1], [2.45, .84], [2.8, 1.36]]) {
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(radius, .012, 6, 96), ringMaterial);
+    ring.rotation.set(Math.PI / 2 + rotation, rotation * .7, rotation); introGroup.add(ring);
+  }
+  introGroup.add(new THREE.PointLight(0x35ccef, 7, 11));
+  introGroup.visible = true; scene.add(introGroup);
 }
 
 function ensureNearby() {
@@ -447,6 +613,7 @@ function ensureNearby() {
 function selectExhibit(e) {
   if (!e) return;
   selected = e;
+  missionState.exhibits.add(e.file); updateMissionUI();
   const group = exhibitRoots.get(e.file);
   if (selectedBox) { scene.remove(selectedBox); selectedBox = null; }
   if (group?.userData.model) { selectedBox = new THREE.BoxHelper(group.userData.model, 0xcdb578); scene.add(selectedBox); }
@@ -534,14 +701,37 @@ function collided(x, z) {
   return false;
 }
 function tick() {
-  if (!active) return;
   const dt = Math.min(clock.getDelta(), .045);
+  const elapsed = clock.elapsedTime;
+  if (introGroup) {
+    introGroup.visible = !active;
+    if (!active) { introGroup.rotation.y = elapsed * .08; introGroup.rotation.z = Math.sin(elapsed * .21) * .035; }
+  }
+  animatedHolograms.forEach(({ ring, core, phase }) => {
+    const pulse = 1 + Math.sin(elapsed * 1.2 + phase) * .018;
+    ring.scale.setScalar(pulse); ring.material.opacity = .48 + (Math.sin(elapsed * 1.4 + phase) + 1) * .1;
+    core.material.opacity = .025 + (Math.sin(elapsed * .9 + phase) + 1) * .009;
+  });
+  if (!active) { renderer.render(scene, camera); return; }
+  if (cameraTransition) {
+    cameraTransition.elapsed = Math.min(cameraTransition.elapsed + dt, cameraTransition.duration);
+    const linear = cameraTransition.elapsed / cameraTransition.duration;
+    const eased = linear * linear * (3 - 2 * linear);
+    const destination = cameraTransition.route[cameraTransition.segment];
+    camera.position.x = THREE.MathUtils.lerp(cameraTransition.startX, destination[0], eased);
+    camera.position.z = THREE.MathUtils.lerp(cameraTransition.startZ, destination[1], eased);
+    if (linear >= 1 && cameraTransition.segment < cameraTransition.route.length - 1) {
+      cameraTransition.segment++; cameraTransition.elapsed = 0;
+      cameraTransition.startX = destination[0]; cameraTransition.startZ = destination[1];
+    } else if (linear >= 1) cameraTransition = null;
+  }
   if (renderer.xr.isPresenting) {
     applyVRMovement(dt);
     updateXRModelRotation();
     const p = getVisitorPosition();
     const current = sections.reduce((a, b) => Math.abs(b.x - p.x) < Math.abs(a.x - p.x) ? b : a);
     $('location-name').textContent = current.title; updateNav(current.id);
+    visitZone(current.id);
     if (performance.now() - lastLoadCheck > 800) { lastLoadCheck = performance.now(); ensureNearby(); }
     if (selected && vrPanel) {
       const exhibit = selected;
@@ -549,7 +739,7 @@ function tick() {
       vrPanel.position.set(exhibit.x + toward.x * 1.7, Math.min(exhibit.size * .68 + 1.2, 7.5), exhibit.z + toward.z * 1.7);
       vrPanel.lookAt(p.x, vrPanel.position.y, p.z);
     }
-  } else if ((controls.isLocked || fallbackLook) && !selected) {
+  } else if ((controls.isLocked || fallbackLook) && !selected && !cameraTransition) {
     const speed = 6.1 * dt;
     const old = camera.position.clone();
     if (keys.has('KeyW') || keys.has('ArrowUp')) controls.moveForward(speed);
@@ -560,6 +750,7 @@ function tick() {
     camera.position.y = 1.68;
     const current = sections.reduce((a, b) => Math.abs(b.x - camera.position.x) < Math.abs(a.x - camera.position.x) ? b : a);
     $('location-name').textContent = current.title; updateNav(current.id);
+    visitZone(current.id);
     if (performance.now() - lastLoadCheck > 800) { lastLoadCheck = performance.now(); ensureNearby(); }
   }
   if (selectedBox) selectedBox.update();
@@ -585,7 +776,8 @@ function stopRendering() {
   animationRunning = false; renderer.setAnimationLoop(null);
 }
 
-buildArchitecture(); buildExhibits(); mergeStaticArchitecture(); setSectionNav(); createVRInfoPanel(); setupXRControllers();
+buildArchitecture(); buildExhibits(); mergeStaticArchitecture(); setSectionNav(); createVRInfoPanel(); createIntroEnvironment(); buildTimeline(); renderMissionQuiz(); updateMissionUI(); setupXRControllers();
+startRendering();
 renderer.xr.addEventListener('sessionstart', () => {
   const startX = camera.position.x, startZ = camera.position.z, yaw = camera.rotation.y;
   playerRig.position.set(startX, 0, startZ); playerRig.rotation.set(0, yaw, 0);
@@ -628,19 +820,50 @@ $('enter-button').addEventListener('click', async () => {
   setTimeout(() => { $('loading').classList.add('hidden'); $('hud').classList.remove('hidden'); }, 380);
 });
 $('help-button').addEventListener('click', () => { controls.unlock(); $('help-modal').classList.remove('hidden'); });
+$('guide-button').addEventListener('click', () => { controls.unlock(); $('guide-modal').classList.remove('hidden'); $('guide-input').focus(); });
+$('mission-button').addEventListener('click', () => { controls.unlock(); renderMissionQuiz(); updateMissionUI(); $('mission-modal').classList.remove('hidden'); });
+$('timeline-button').addEventListener('click', () => { controls.unlock(); $('timeline-modal').classList.remove('hidden'); });
+$('guide-form').addEventListener('submit', event => {
+  event.preventDefault();
+  const question = $('guide-input').value.trim();
+  if (!question) return;
+  $('guide-answer').textContent = guideResponse(question);
+  $('guide-input').value = '';
+});
+document.querySelectorAll('[data-question]').forEach(button => button.addEventListener('click', () => {
+  $('guide-answer').textContent = guideResponse(button.dataset.question);
+}));
+$('guide-speak').addEventListener('click', () => {
+  if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+    showToast('VOICE NARRATION IS NOT AVAILABLE IN THIS BROWSER'); return;
+  }
+  speechSynthesis.cancel();
+  const utterance = new SpeechSynthesisUtterance($('guide-answer').textContent);
+  utterance.rate = .95; utterance.pitch = 1.02; utterance.lang = document.documentElement.lang || 'en';
+  speechSynthesis.speak(utterance);
+});
+$('timeline-visit').addEventListener('click', () => {
+  const section = sections.find(item => item.id === $('timeline-visit').dataset.section);
+  if (!section) return;
+  $('timeline-modal').classList.add('hidden');
+  Array.from(document.querySelectorAll('.nav-button')).find(button => button.textContent === section.short)?.click();
+});
 $('vr-status-button').addEventListener('click', async () => {
   controls.unlock();
   $('vr-status-modal').classList.remove('hidden');
   await updateVRDiagnostics();
 });
 $('vr-recheck').addEventListener('click', updateVRDiagnostics);
-document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => { $(b.dataset.close).classList.add('hidden'); if (!selected) requestDesktopLook(); }));
+document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => {
+  $(b.dataset.close).classList.add('hidden');
+  if (!selected && active && !renderer.xr.isPresenting) requestDesktopLook();
+}));
 $('close-info').addEventListener('click', () => {
   clearSelection();
   requestDesktopLook(); $('hint').textContent = fallbackLook ? 'DRAG TO LOOK · WASD TO MOVE · CLICK AN EXHIBIT TO INSPECT' : 'WASD TO MOVE · CLICK AN EXHIBIT TO INSPECT · ESC TO PAUSE';
 });
 $('exit-button').addEventListener('click', () => {
-  controls.unlock(); active = false; clearSelection(); stopRendering();
+  controls.unlock(); active = false; cameraTransition = null; clearSelection();
   const session = renderer.xr.getSession(); if (session) session.end();
   $('hud').classList.add('hidden'); $('welcome').classList.remove('hidden');
 });
