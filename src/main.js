@@ -719,6 +719,8 @@ function setSectionNav() {
       cameraTransition = { route, segment: 0, startX: camera.position.x, startZ: camera.position.z, elapsed: 0, duration: .62 };
       $('location-name').textContent = s.title; updateNav(s.id);
       missionState.zones.add(s.id); updateMissionUI();
+      document.querySelector('.topbar').classList.remove('menu-open');
+      $('nav-menu-toggle').setAttribute('aria-expanded', 'false');
       if (!controls.isLocked) requestDesktopLook(); ensureNearby();
     });
     nav.appendChild(button);
@@ -1074,8 +1076,27 @@ window.addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix();
   renderer.setPixelRatio(renderScale); renderer.setSize(innerWidth, innerHeight);
 });
-window.addEventListener('keydown', e => { keys.add(e.code); if (e.code === 'Escape') $('hint').textContent = 'CLICK TO LOOK AROUND · WASD TO MOVE'; });
+window.addEventListener('keydown', e => {
+  keys.add(e.code);
+  if (e.code === 'Escape') {
+    $('hint').textContent = 'CLICK TO LOOK AROUND · WASD TO MOVE';
+    document.querySelector('.topbar').classList.remove('menu-open');
+    $('nav-menu-toggle').setAttribute('aria-expanded', 'false');
+  }
+});
 window.addEventListener('keyup', e => keys.delete(e.code));
+const topbar = document.querySelector('.topbar');
+const navMenuToggle = $('nav-menu-toggle');
+navMenuToggle.addEventListener('click', () => {
+  const open = topbar.classList.toggle('menu-open');
+  navMenuToggle.setAttribute('aria-expanded', String(open));
+});
+document.addEventListener('click', e => {
+  if (!topbar.contains(e.target) && topbar.classList.contains('menu-open')) {
+    topbar.classList.remove('menu-open');
+    navMenuToggle.setAttribute('aria-expanded', 'false');
+  }
+});
 controls.addEventListener('lock', () => { $('hint').textContent = 'WASD TO MOVE · CLICK AN EXHIBIT TO INSPECT · ESC TO PAUSE'; });
 controls.addEventListener('unlock', () => { if (active && !selected) $('hint').textContent = 'CLICK TO LOOK AROUND · WASD TO MOVE'; });
 document.addEventListener('pointerlockerror', () => {

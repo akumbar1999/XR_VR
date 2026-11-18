@@ -45,3 +45,50 @@ h1 span,.loader-mark span,.brand-mark span{color:var(--cyan)}
 body.ar-active #hud>:not(#ar-modal){visibility:hidden!important;pointer-events:none!important}body.ar-active #ar-modal{position:fixed!important;inset:0!important;display:block!important;opacity:1!important;visibility:visible!important;pointer-events:none!important;background:transparent!important;backdrop-filter:none!important;z-index:999!important}body.ar-active #ar-modal .modal-card{position:absolute;left:50%;bottom:max(16px,env(safe-area-inset-bottom));transform:translateX(-50%);width:min(560px,calc(100vw - 24px));max-height:42vh;overflow:auto;padding:17px 20px;background:#071420d9;border-color:#56dcef88;pointer-events:auto}body.ar-active #ar-modal .modal-card h2{font-size:26px;margin:8px 0}body.ar-active #ar-modal .modal-card>p,body.ar-active #ar-modal .modal-card .form-label,body.ar-active #ar-modal .modal-card .ar-instructions{font-size:9px;margin:5px 0}
 @media(max-width:800px){.experience-grid{grid-template-columns:1fr 1fr}.experience-tile{min-height:94px;padding:12px}.experience-tile strong{font-size:16px}.simulation-controls{align-items:flex-start;flex-direction:column}.form-grid{grid-template-columns:1fr}.war-room-caption>span:last-child{margin-left:0}}
 @media(max-width:450px){.experience-grid{grid-template-columns:1fr}.experience-tile{min-height:78px}.experience-tile strong{margin-top:7px}.war-room-layers .chip-button{font-size:8px;padding:7px}.ar-actions{align-items:stretch;flex-direction:column}#ARButton{width:100%!important}body.ar-active #ar-modal .modal-card{max-height:48vh}}
+
+/* Header layout: reserve separate space for the logo, collection navigation and controls. */
+.topbar{
+  --museum-topbar-height:76px;
+  height:auto;min-height:var(--museum-topbar-height);padding:10px clamp(18px,2vw,38px);
+  display:grid;grid-template-columns:minmax(150px,auto) minmax(0,1fr) minmax(0,auto);
+  grid-template-areas:"brand nav tools";align-items:center;column-gap:clamp(12px,1.4vw,26px)
+}
+.brand{grid-area:brand;min-width:0;white-space:nowrap}
+#section-nav{grid-area:nav;position:static;left:auto;transform:none;width:100%;min-width:0;display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:5px}
+.nav-button{flex:0 0 auto;min-height:36px;padding:8px clamp(7px,.65vw,12px);font-size:clamp(8px,.58vw,10px);line-height:1.2;white-space:nowrap}
+.header-tools{grid-area:tools;display:flex;align-items:center;justify-content:flex-end;min-width:0;gap:6px}
+.top-actions{display:flex;align-items:center;justify-content:flex-end;min-width:0;gap:5px;flex-wrap:wrap}
+.top-actions .icon-button{padding:8px 9px;font-size:8px;white-space:nowrap}
+#VRButton{flex:0 0 auto}
+.menu-toggle{display:none}
+.location-chip{top:calc(var(--museum-topbar-height,76px) + 12px)}
+
+@media(max-width:1500px) and (min-width:851px){
+  :root{--museum-topbar-height:112px}
+  .topbar{--museum-topbar-height:112px;grid-template-columns:minmax(140px,auto) minmax(0,1fr);grid-template-rows:auto auto;grid-template-areas:"brand tools" "nav nav";row-gap:4px;column-gap:12px;padding:9px 20px}
+  #section-nav{flex-wrap:nowrap;justify-content:center;overflow-x:auto;overflow-y:hidden;padding:3px 2px;scrollbar-width:thin}
+  .header-tools{justify-self:end}
+}
+@media(max-width:1100px) and (min-width:851px){
+  .top-actions .icon-button span{display:none}
+  .top-actions .icon-button{padding-inline:8px}
+}
+@media(max-width:850px){
+  :root{--museum-topbar-height:64px}
+  .topbar{--museum-topbar-height:64px;height:64px;min-height:64px;padding:8px 12px;grid-template-columns:minmax(0,1fr) auto;grid-template-rows:1fr;grid-template-areas:"brand tools";column-gap:8px;align-items:center}
+  .brand{gap:7px;font-size:7px}
+  .brand-mark{font-size:21px}
+  .header-tools{gap:6px}
+  .menu-toggle{display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:8px 10px;font-size:8px}
+  #section-nav,.top-actions{display:none}
+  .topbar.menu-open #section-nav{position:absolute;top:calc(100% + 6px);left:10px;right:10px;width:auto;transform:none;display:flex;justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;gap:5px;padding:8px;background:rgba(5,16,25,.97);border:1px solid #56dcef62;box-shadow:0 12px 35px #0009;z-index:8;scrollbar-width:thin}
+  .topbar.menu-open .top-actions{position:absolute;top:calc(100% + 60px);left:10px;right:10px;max-width:none;display:flex;justify-content:flex-start;align-items:center;flex-wrap:wrap;gap:6px;padding:10px;background:rgba(5,16,25,.97);border:1px solid #56dcef62;box-shadow:0 12px 35px #0009;z-index:8}
+  .topbar.menu-open .top-actions .icon-button{display:inline-flex;white-space:nowrap}
+  .nav-button{flex:0 0 auto;white-space:nowrap}
+  .location-chip{top:calc(var(--museum-topbar-height) + 12px);left:14px;padding:8px 11px}
+}
+@media(max-width:450px){
+  .brand{font-size:0}
+  .brand-mark{font-size:23px}
+  .topbar.menu-open .top-actions{max-height:calc(100dvh - 184px);overflow-y:auto}
+}
