@@ -162,6 +162,8 @@ const arRuntime = { active: false, hitTestSource: null, session: null, selectedF
 const remoteVisitors = new Map();
 let multiplayerConnected = false;
 let speechRecognizer = null;
+let recognitionStartTimer = null;
+let activeUtterance = null;
 let scenarioTimer = null;
 let scenarioPlaying = false;
 const missionQuestions = [
@@ -184,15 +186,22 @@ function box(parent, w, h, d, x, y, z, material, cast = false, receive = true) {
   const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
   mesh.position.set(x, y, z); mesh.castShadow = cast; mesh.receiveShadow = receive; parent.add(mesh); return mesh;
 }
-function addText(parent, text, width, height, x, y, z) {
-  const c = document.createElement('canvas'); c.width = 1024; c.height = 256;
+function addText(parent, text, width, height, x, y, z, collectionNumber) {
+  const c = document.createElement('canvas'); c.width = 1536; c.height = 320;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#121914'; ctx.fillRect(0, 0, c.width, c.height);
-  ctx.fillStyle = '#bb9d64'; ctx.fillRect(0, 0, 10, c.height);
-  ctx.fillStyle = '#69d9ec'; ctx.font = '600 33px Arial'; ctx.letterSpacing = '7px'; ctx.fillText('VIRTUAL DEFENCE MUSEUM  /  COLLECTION', 45, 67);
-  ctx.fillStyle = '#f0eee5'; ctx.font = 'bold 83px Arial'; ctx.letterSpacing = '3px'; ctx.fillText(text.toUpperCase(), 45, 170);
+  const background = ctx.createLinearGradient(0, 0, c.width, c.height);
+  background.addColorStop(0, '#07131d'); background.addColorStop(1, '#101e29');
+  ctx.fillStyle = background; ctx.fillRect(0, 0, c.width, c.height);
+  ctx.strokeStyle = 'rgba(96,222,241,.62)'; ctx.lineWidth = 3; ctx.strokeRect(2, 2, c.width - 4, c.height - 4);
+  ctx.fillStyle = '#bb9d64'; ctx.fillRect(0, 0, 13, c.height);
+  ctx.fillStyle = '#69d9ec'; ctx.font = '600 34px Arial'; ctx.letterSpacing = '6px';
+  ctx.textAlign = 'left'; ctx.fillText(`VIRTUAL DEFENCE MUSEUM  /  COLLECTION ${String(collectionNumber).padStart(2, '0')}`, 58, 88, c.width - 116);
+  ctx.fillStyle = '#f0f8fa'; ctx.font = '700 118px Arial'; ctx.letterSpacing = '2px'; ctx.textAlign = 'center';
+  ctx.fillText(text.toUpperCase(), c.width / 2, 244, c.width - 150);
   const texture = new THREE.CanvasTexture(c); texture.colorSpace = THREE.SRGBColorSpace;
   const mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: texture, side: THREE.DoubleSide }));
+  mesh.name = `collection-sign-${collectionNumber}`;
+  mesh.userData.collectionTitle = text;
   mesh.position.set(x, y, z); parent.add(mesh); return mesh;
 }
 
@@ -225,9 +234,11 @@ function buildArchitecture() {
     box(scene, .28, 6.7, 8, x, 3.35, 13, mats.wall);
     box(scene, .38, .2, 9, x, 6.8, -13, mats.trim);
     box(scene, .38, .2, 9, x, 6.8, 13, mats.trim);
-    const section = sections.reduce((a, b) => Math.abs(b.x - (x - 8)) < Math.abs(a.x - (x - 8)) ? b : a);
-    addText(scene, section.title, 8.5, 2.1, x + .4, 5.35, -16.55);
   }
+  // Place each name in the center of its own bay, clear of the divider supports.
+  sections.forEach((section, index) => {
+    addText(scene, section.title, 11.2, 2.45, section.x, 5.55, -16.32, index + 1);
+  });
   // Wall reliefs, upper gallery windows, and brass floor inlays.
   for (let x = -39; x <= 39; x += 4) {
     box(scene, .04, 8.8, .05, x, 6.1, -16.58, mats.trim);
@@ -579,12 +590,35 @@ function updateAudioStatus(message, state = '') {
 
 function speakMuseumText(text) {
   if (!('speechSynthesis' in window) || typeof SpeechSynthesisUtterance === 'undefined') {
+    $('guide-voice-status').textContent = 'Spoken narration is unavailable in this browser.';
     showToast('SPOKEN NARRATION IS NOT AVAILABLE IN THIS BROWSER'); return false;
   }
+  activeUtterance = null;
   speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = .95; utterance.pitch = 1.02; utterance.lang = document.documentElement.lang || 'en';
+  activeUtterance = utterance;
+  utterance.rate = .95; utterance.pitch = 1.02; utterance.lang = document.documentElement.lang || 'en-US';
+  utterance.onstart = () => {
+    $('guide-speak').textContent = '■ STOP NARRATION';
+    $('guide-voice-status').textContent = 'Speaking the guide response…';
+  };
+  utterance.onend = () => {
+    if (activeUtterance !== utterance) return;
+    activeUtterance = null; $('guide-speak').textContent = '◖ NARRATE';
+    if (!$('guide-modal').classList.contains('hidden')) $('guide-voice-status').textContent = 'Ready for another question.';
+  };
+  utterance.onerror = event => {
+    if (activeUtterance !== utterance) return;
+    activeUtterance = null; $('guide-speak').textContent = '◖ NARRATE';
+    $('guide-voice-status').textContent = `Spoken response failed (${event.error || 'speech unavailable'}).`;
+  };
   speechSynthesis.speak(utterance); return true;
+}
+
+function stopMuseumSpeech() {
+  activeUtterance = null;
+  window.speechSynthesis?.cancel?.();
+  $('guide-speak').textContent = '◖ NARRATE';
 }
 
 function handleVoiceQuestion(question) {
@@ -596,27 +630,86 @@ function handleVoiceQuestion(question) {
 
 function toggleGuideRecognition() {
   if (speechRecognizer) {
-    speechRecognizer.stop(); speechRecognizer = null;
-    $('guide-listen').textContent = '◉ ASK BY VOICE'; return;
+    const recognition = speechRecognizer;
+    speechRecognizer = null;
+    window.clearTimeout(recognitionStartTimer);
+    recognitionStartTimer = null;
+    try { recognition.stop(); } catch { /* Recognition may have ended between clicks. */ }
+    $('guide-listen').textContent = '◉ ASK BY VOICE';
+    $('guide-listen').setAttribute('aria-pressed', 'false');
+    $('guide-voice-status').textContent = 'Voice input stopped.';
+    return;
   }
   const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!Recognition) {
-    $('guide-voice-status').textContent = 'Speech recognition is not supported here. Type a question or use a headset/browser with Web Speech recognition.';
+    $('guide-voice-status').textContent = 'Voice input is unavailable in this browser. Try Chrome or Edge, allow microphone access, or type your question below. Narration can still read answers aloud.';
     return;
   }
   const recognition = new Recognition();
   speechRecognizer = recognition;
-  recognition.lang = 'en-US'; recognition.continuous = false; recognition.interimResults = false; recognition.maxAlternatives = 1;
-  recognition.onstart = () => { $('guide-listen').textContent = 'STOP LISTENING'; $('guide-voice-status').textContent = 'Listening… speak a short question.'; };
-  recognition.onresult = event => {
-    const transcript = event.results?.[0]?.[0]?.transcript?.trim();
-    if (transcript) handleVoiceQuestion(transcript);
+  recognition.lang = 'en-US'; recognition.continuous = false; recognition.interimResults = true; recognition.maxAlternatives = 1;
+  recognition.onstart = () => {
+    window.clearTimeout(recognitionStartTimer);
+    recognitionStartTimer = null;
+    $('guide-listen').textContent = 'STOP LISTENING';
+    $('guide-listen').setAttribute('aria-pressed', 'true');
+    $('guide-voice-status').textContent = 'Listening… ask about an exhibit, controls, history, or missions.';
   };
-  recognition.onerror = event => { $('guide-voice-status').textContent = `Voice input failed (${event.error}). Check microphone permission or use the text field.`; };
-  recognition.onend = () => { if (speechRecognizer === recognition) speechRecognizer = null; $('guide-listen').textContent = '◉ ASK BY VOICE'; };
-  $('guide-voice-status').textContent = 'Requesting microphone access…';
-  try { recognition.start(); }
-  catch (error) { speechRecognizer = null; $('guide-voice-status').textContent = `Could not start microphone input (${error?.name || 'browser error'}).`; }
+  recognition.onresult = event => {
+    const result = event.results?.[event.resultIndex] || event.results?.[event.results.length - 1];
+    const transcript = result?.[0]?.transcript?.trim();
+    if (!transcript) return;
+    if (result.isFinal) handleVoiceQuestion(transcript);
+    else $('guide-voice-status').textContent = `Hearing: “${transcript}”`;
+  };
+  recognition.onerror = event => {
+    window.clearTimeout(recognitionStartTimer);
+    recognitionStartTimer = null;
+    const messages = {
+      'not-allowed': 'Microphone or speech access was denied. Allow microphone access for this site, then click ASK BY VOICE again.',
+      'service-not-allowed': 'This browser blocked its speech service. Try Chrome or Edge, or type your question below.',
+      'audio-capture': 'No microphone was found. Connect or enable a microphone, then try again.',
+      network: 'The browser speech service could not connect. Check your connection and try again.',
+      'no-speech': 'No speech was detected. Click ASK BY VOICE and try again.',
+      aborted: 'Voice input stopped.',
+    };
+    $('guide-voice-status').textContent = messages[event.error] || `Voice input failed (${event.error || 'unknown error'}). Try again or type your question.`;
+    $('guide-listen').textContent = '◉ ASK BY VOICE';
+    $('guide-listen').setAttribute('aria-pressed', 'false');
+  };
+  recognition.onend = () => {
+    window.clearTimeout(recognitionStartTimer);
+    recognitionStartTimer = null;
+    if (speechRecognizer === recognition) speechRecognizer = null;
+    $('guide-listen').textContent = '◉ ASK BY VOICE';
+    $('guide-listen').setAttribute('aria-pressed', 'false');
+    const status = $('guide-voice-status').textContent;
+    if (status.startsWith('Listening…') || status.startsWith('Hearing:')) {
+      $('guide-voice-status').textContent = 'No complete question was captured. Click ASK BY VOICE and try again.';
+    }
+  };
+  $('guide-voice-status').textContent = 'Starting voice input…';
+  $('guide-listen').textContent = 'CANCEL VOICE START';
+  $('guide-listen').setAttribute('aria-pressed', 'true');
+  try {
+    recognition.start();
+    // Some browser runtimes silently leave recognition pending if microphone
+    // permission or the network speech service is blocked. Never leave the UI
+    // stuck on a spinner-like state in that case.
+    recognitionStartTimer = window.setTimeout(() => {
+      if (speechRecognizer !== recognition) return;
+      $('guide-voice-status').textContent = 'The browser has not started listening. Check this site’s microphone permission and speech service, then try again. You can also type a question below.';
+      $('guide-listen').textContent = 'CANCEL VOICE START';
+    }, 4000);
+  }
+  catch (error) {
+    window.clearTimeout(recognitionStartTimer);
+    recognitionStartTimer = null;
+    speechRecognizer = null;
+    $('guide-listen').textContent = '◉ ASK BY VOICE';
+    $('guide-listen').setAttribute('aria-pressed', 'false');
+    $('guide-voice-status').textContent = `Could not start microphone input (${error?.name || 'browser error'}). Check site permissions and try again.`;
+  }
 }
 
 function updateXRModelRotation() {
@@ -1239,6 +1332,9 @@ document.querySelectorAll('[data-question]').forEach(button => button.addEventLi
   $('guide-answer').textContent = guideResponse(button.dataset.question);
 }));
 $('guide-speak').addEventListener('click', () => {
+  if (activeUtterance && speechSynthesis.speaking) {
+    stopMuseumSpeech(); $('guide-voice-status').textContent = 'Narration stopped.'; return;
+  }
   speakMuseumText($('guide-answer').textContent);
 });
 $('info-narrate').addEventListener('click', () => {
@@ -1260,8 +1356,11 @@ document.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click
   const id = b.dataset.close;
   if (id === 'ar-modal' && arRuntime.session) { arRuntime.session.end(); return; }
   $(id).classList.add('hidden');
-  if (id === 'guide-modal' && speechRecognizer) { speechRecognizer.stop(); speechRecognizer = null; $('guide-listen').textContent = '◉ ASK BY VOICE'; }
-  if (id === 'guide-modal' && 'speechSynthesis' in window) speechSynthesis.cancel();
+  if (id === 'guide-modal' && speechRecognizer) {
+    try { speechRecognizer.stop(); } catch { /* Recognition may already have ended. */ }
+    speechRecognizer = null; $('guide-listen').textContent = '◉ ASK BY VOICE'; $('guide-listen').setAttribute('aria-pressed', 'false');
+  }
+  if (id === 'guide-modal' && 'speechSynthesis' in window) stopMuseumSpeech();
   if (id === 'war-room-modal' || id === 'simulation-modal') {
     warRoom.root.visible = false;
     if (scenarioTimer) clearInterval(scenarioTimer);
@@ -1276,8 +1375,8 @@ $('close-info').addEventListener('click', () => {
 });
 $('exit-button').addEventListener('click', () => {
   controls.unlock(); active = false; cameraTransition = null; clearSelection();
-  if (speechRecognizer) { speechRecognizer.stop(); speechRecognizer = null; }
-  window.speechSynthesis?.cancel?.();
+  if (speechRecognizer) { try { speechRecognizer.stop(); } catch { /* Recognition may already have ended. */ } speechRecognizer = null; }
+  stopMuseumSpeech();
   multiplayer.leave(false).then(() => { multiplayerConnected = false; });
   museumAudio.setAmbientEnabled(false).catch(() => {});
   const session = renderer.xr.getSession(); if (session) session.end();

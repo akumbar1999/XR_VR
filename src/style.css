@@ -96,3 +96,5 @@ body.ar-active #hud>:not(#ar-modal){visibility:hidden!important;pointer-events:n
   #VRButton{padding:6px 7px!important;font-size:7px!important;letter-spacing:.04em!important}
   .topbar.menu-open .top-actions{max-height:calc(100dvh - 184px);overflow-y:auto}
 }
+.voice-status{min-height:18px;margin-top:9px;color:#83b9c8;font-size:10px;line-height:1.5}
+.chip-button[aria-pressed="true"]{border-color:var(--cyan);background:#123647;color:#e3fcff;box-shadow:0 0 14px #33d2eb22}
