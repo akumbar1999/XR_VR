@@ -4,6 +4,8 @@ import { PointerLockControls } from 'three/addons/controls/PointerLockControls.j
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { VRButton } from 'three/addons/webxr/VRButton.js';
 import { ARButton } from 'three/addons/webxr/ARButton.js';
+import { XRControllerModelFactory } from 'three/addons/webxr/XRControllerModelFactory.js';
+import { XRHandModelFactory } from 'three/addons/webxr/XRHandModelFactory.js';
 import { createWarRoom, scenarios } from './warRoom.js';
 import { MuseumAudio } from './museumAudio.js';
 import { MuseumMultiplayer, multiplayerConfigured } from './multiplayer.js';
@@ -133,6 +135,8 @@ const loaded = new Set();
 const loading = new Map();
 const keys = new Set();
 const xrControllers = [];
+const xrControllerGrips = [];
+const xrHands = [];
 let active = false;
 let selected = null;
 let selectedBox = null;
@@ -329,10 +333,36 @@ function getVisitorPosition(target = new THREE.Vector3()) {
 
 function setupXRControllers() {
   const rayGeometry = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, -1)]);
+  const controllerModelFactory = new XRControllerModelFactory();
+  const handModelFactory = new XRHandModelFactory();
   for (let index = 0; index < 2; index++) {
     const controller = renderer.xr.getController(index);
+    const grip = renderer.xr.getControllerGrip(index);
+    const hand = renderer.xr.getHand(index);
     const ray = new THREE.Line(rayGeometry, new THREE.LineBasicMaterial({ color: 0xd9bd7b, transparent: true, opacity: .88 }));
     ray.name = 'controller-ray'; ray.scale.z = 12; controller.add(ray); controller.visible = false;
+    grip.name = `tracked-controller-grip-${index}`; grip.visible = false;
+    grip.add(controllerModelFactory.createControllerModel(grip));
+    grip.addEventListener('connected', event => {
+      grip.userData.connected = event.data.targetRayMode === 'tracked-pointer' && !event.data.hand;
+      grip.userData.handedness = event.data.handedness;
+      grip.visible = grip.userData.connected;
+    });
+    grip.addEventListener('disconnected', () => { grip.userData.connected = false; grip.visible = false; });
+    hand.name = `tracked-hand-${index}`; hand.visible = false;
+    const handModel = handModelFactory.createHandModel(hand, 'spheres');
+    hand.add(handModel);
+    hand.addEventListener('connected', event => {
+      hand.userData.hasTrackedHand = !!event.data.hand;
+      hand.visible = hand.userData.hasTrackedHand;
+      if (hand.userData.hasTrackedHand) handModel.traverse(object => {
+        if (!object.isInstancedMesh) return;
+        object.material.color.set(0xd3a18b);
+        object.material.roughness = .78;
+        object.material.metalness = 0;
+      });
+    });
+    hand.addEventListener('disconnected', () => { hand.userData.hasTrackedHand = false; hand.visible = false; });
     controller.addEventListener('connected', event => { controller.userData.handedness = event.data.handedness; });
     controller.addEventListener('disconnected', () => { controller.userData.handedness = null; });
     controller.addEventListener('select', () => selectFromController(controller));
@@ -346,7 +376,8 @@ function setupXRControllers() {
       controller.userData.suppressNextSelection = !!controller.userData.rotationMoved;
       controller.userData.rotatingFile = null;
     });
-    scene.add(controller); xrControllers.push(controller);
+    scene.add(controller, grip, hand);
+    xrControllers.push(controller); xrControllerGrips.push(grip); xrHands.push(hand);
   }
 }
 
@@ -415,10 +446,12 @@ function beginARPresentation(session) {
   arRuntime.previousBackground = scene.background; arRuntime.previousFog = scene.fog; arRuntime.previousAlpha = renderer.getClearAlpha();
   arRuntime.previousCameraPosition = camera.position.clone(); arRuntime.previousCameraQuaternion = camera.quaternion.clone();
   camera.position.set(0, 0, 0); camera.rotation.set(0, 0, 0); playerRig.position.set(0, 0, 0); playerRig.rotation.set(0, 0, 0);
-  const keepVisible = new Set([playerRig, arReticle, arPlacedRoot, ...xrControllers]);
+  const keepVisible = new Set([playerRig, arReticle, arPlacedRoot, ...xrControllers, ...xrControllerGrips, ...xrHands]);
   arRuntime.hiddenObjects = scene.children.map(object => ({ object, visible: object.visible })).filter(({ object }) => !keepVisible.has(object));
   arRuntime.hiddenObjects.forEach(({ object }) => { object.visible = false; });
   xrControllers.forEach(controller => { controller.visible = true; });
+  xrControllerGrips.forEach(grip => { grip.visible = !!grip.userData.connected; });
+  xrHands.forEach(hand => { hand.visible = !!hand.userData.hasTrackedHand; });
   scene.background = null; scene.fog = null; renderer.setClearAlpha(0);
   arRootVisibility(true);
   document.body.classList.add('ar-active');
@@ -1058,6 +1091,8 @@ renderer.xr.addEventListener('sessionstart', () => {
   playerRig.position.set(startX, 0, startZ); playerRig.rotation.set(0, yaw, 0);
   camera.position.set(0, 0, 0); camera.rotation.set(0, 0, 0);
   xrControllers.forEach(controller => { controller.visible = true; });
+  xrControllerGrips.forEach(grip => { grip.visible = !!grip.userData.connected; });
+  xrHands.forEach(hand => { hand.visible = !!hand.userData.hasTrackedHand; });
   vrButton.setAttribute('aria-label', 'Exit immersive VR');
   $('hint').textContent = 'LEFT STICK MOVE · RIGHT STICK TURN · TRIGGER SELECT · HOLD + MOVE TO ROTATE';
 });
@@ -1067,6 +1102,8 @@ renderer.xr.addEventListener('sessionend', () => {
   camera.rotation.set(0, playerRig.rotation.y, 0);
   playerRig.position.set(0, 0, 0); playerRig.rotation.set(0, 0, 0);
   xrControllers.forEach(controller => { controller.visible = false; });
+  xrControllerGrips.forEach(grip => { grip.visible = false; });
+  xrHands.forEach(hand => { hand.visible = false; });
   if (vrPanel) vrPanel.visible = false;
   vrButton.setAttribute('aria-label', 'Enter immersive VR');
   $('hint').textContent = 'CLICK TO LOOK AROUND · WASD TO MOVE';
