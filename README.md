@@ -59,6 +59,8 @@ Walk through five collection zones in a futuristic, cyan-lit exhibition hall. Or
 | **Quest trigger aimed at open floor** | Teleport |
 | **AR place control / controller trigger** | Place the selected exhibit at the visible hit-test reticle |
 
+Quest controller grips, tracked hands, and pointer rays follow the live WebXR input poses. They share the museum’s player rig, so they stay aligned with the visitor during physical movement, stick locomotion, snap turns, and teleportation.
+
 ## Run locally
 
 Requires Node.js 20 or later.
