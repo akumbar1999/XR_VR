@@ -387,7 +387,11 @@ function setupXRControllers() {
       controller.userData.suppressNextSelection = !!controller.userData.rotationMoved;
       controller.userData.rotatingFile = null;
     });
-    scene.add(controller, grip, hand);
+    // WebXR reports input poses in the session reference space. Keep every
+    // tracked input object under the same rig as the XR camera so artificial
+    // locomotion and snap turns transform the hands, controller models, and
+    // their rays together with the visitor.
+    playerRig.add(controller, grip, hand);
     xrControllers.push(controller); xrControllerGrips.push(grip); xrHands.push(hand);
   }
 }
