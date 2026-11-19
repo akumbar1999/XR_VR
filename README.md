@@ -15,6 +15,10 @@
 
 ---
 
+## Project description
+
+**XR_VR — Virtual Defence Museum** is a browser-based, interactive 3D museum built with Three.js and WebXR. Visitors can walk through five themed galleries, inspect the project’s original GLB exhibits, and explore their historical and technical context. It combines a futuristic command-centre aesthetic with desktop navigation, optional VR/AR experiences, educational missions, and a built-in museum guide.
+
 ## Explore the museum
 
 Walk through five collection zones in a futuristic, cyan-lit exhibition hall. Original GLB models stream in as you approach. Inspect each artifact, read the museum notes, and rotate it. Cinematic intro, emissive holograms, adaptive rendering, and existing desktop/WebXR navigation remain part of the same museum.
@@ -31,8 +35,8 @@ Walk through five collection zones in a futuristic, cyan-lit exhibition hall. Or
 
 ## Experiences
 
-- **Museum guide:** The guide answers from bundled exhibit descriptions and controls. The browser can narrate answers with speech synthesis. It is not connected to an AI service.
-- **Voice questions:** Where `SpeechRecognition` is available, use the microphone control. Browser support varies and some recognition services send audio to their servers; the interface explains this before use. Typed questions and speech synthesis remain available without recognition.
+- **Museum guide:** The guide answers from bundled exhibit descriptions and controls. Click **NARRATE** to hear an answer or stop active narration. It is not connected to an AI service.
+- **Voice questions:** Click **ASK BY VOICE** to start browser speech recognition and click again to stop. When supported and permitted, the guide shows the recognized question and reads its built-in answer aloud. Browser and speech-service support varies; clear permission, microphone, and service error messages appear when recognition cannot start. Typed questions remain available as a fallback.
 - **Virtual War Room:** A 3D holographic command display with toggleable front-line, terrain, and timeline layers.
 - **Historical scenarios:** Scrub or play staged notes for the Somme (1916) and Battle of Britain (1940). The map is a schematic teaching aid, not an accurate tactical map. No combat, casualties, or weapon effects are simulated. Sources are linked in the scenario panel.
 - **Missions:** Visit the five zones, inspect three distinct exhibits, and answer three knowledge questions. Earn badges and a score out of 100.
